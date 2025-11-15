@@ -5,7 +5,7 @@
 // import { requiredSignIn, isAdmin } from "../middlewares/Auth.js";
 // import { sendMail } from "../utils/mailer.js";
 // import { sendSms } from "../utils/sms.js";
-
+ 
 // const router = express.Router();
 
 // /* ---------------------- Helpers ---------------------- */
@@ -1128,23 +1128,28 @@
 
 // export default router;
 
-
-
 // src/routes/orders.js
 import express from "express";
 import mongoose from "mongoose";
 import Order from "../models/Order.js";
-import Product from "../models/post.js"; // your Post model (product) - uses `guest` as numeric stock
+import Product from "../models/post.js";
 import { requiredSignIn, isAdmin } from "../middlewares/Auth.js";
 import { sendMail } from "../utils/mailer.js";
 import { sendSms } from "../utils/sms.js";
 
 const router = express.Router();
 
-/* ---------------------- Helper utilities (notifications / formatting) ---------------------- */
+/* ---------------------- Helpers ---------------------- */
 
 function generateOtp() {
   return String(Math.floor(100000 + Math.random() * 900000)); // 6-digit
+}
+
+function generateDeliveryToken(len = 10) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let t = "";
+  for (let i = 0; i < len; i++) t += chars[Math.floor(Math.random() * chars.length)];
+  return t;
 }
 
 async function safeNotify({ mailTo, mailSubject, mailHtml, mailText, smsTo, smsBody }) {
@@ -1153,7 +1158,6 @@ async function safeNotify({ mailTo, mailSubject, mailHtml, mailText, smsTo, smsB
   } catch (err) {
     console.warn("safeNotify - mail error:", err?.message || err);
   }
-
   try {
     if (smsTo) await sendSms({ to: smsTo, body: smsBody });
   } catch (err) {
@@ -1212,109 +1216,6 @@ function otpMessageHtml(otp, minutes = 10) {
   return `<p>Your verification code is <strong>${otp}</strong>. It expires in ${minutes} minutes.</p><p>Do not share this code with anyone.</p>`;
 }
 
-/* ---------------------- Stock helpers (transactions + idempotency) ---------------------- */
-
-/**
- * changeProductStock(session, productId, delta)
- * - delta: negative to reduce, positive to add back
- * - updates `guest` field on Product (Post) model (your product quantity)
- * - throws if product not found or would go negative
- */
-async function changeProductStock(session, productId, delta) {
-  const prod = await Product.findById(productId).session(session);
-  if (!prod) throw new Error(`Product not found: ${productId}`);
-
-  // Using `guest` as numeric stock based on your Post model earlier
-  const current = Number(prod.guest || 0);
-  const next = current + Number(delta);
-
-  if (next < 0) {
-    throw new Error(`Insufficient stock for product ${productId} (current ${current}, delta ${delta})`);
-  }
-
-  prod.guest = next;
-  await prod.save({ session });
-}
-
-/**
- * applyStockReductionForOrder(orderId)
- * - runs a transaction that sets stockReduced and decrements product quantities
- */
-async function applyStockReductionForOrder(orderId) {
-  const session = await mongoose.startSession();
-  try {
-    session.startTransaction();
-
-    const order = await Order.findById(orderId).session(session).populate("items.product");
-    if (!order) throw new Error("Order not found");
-
-    if (order.stockReduced) {
-      // already applied; nothing to do
-      await session.commitTransaction();
-      session.endSession();
-      return order;
-    }
-
-    // decrement each product
-    for (const it of order.items) {
-      const pid = it.product && (it.product._id || it.product);
-      const qty = Number(it.quantity || 0);
-      if (!pid || qty <= 0) continue;
-      await changeProductStock(session, pid, -qty);
-    }
-
-    order.stockReduced = true;
-    await order.save({ session });
-
-    await session.commitTransaction();
-    session.endSession();
-    return order;
-  } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
-    throw err;
-  }
-}
-
-/**
- * applyStockRestoreForOrder(orderId)
- * - runs a transaction that sets stockRestored and increments product quantities
- */
-async function applyStockRestoreForOrder(orderId) {
-  const session = await mongoose.startSession();
-  try {
-    session.startTransaction();
-
-    const order = await Order.findById(orderId).session(session).populate("items.product");
-    if (!order) throw new Error("Order not found");
-
-    if (order.stockRestored) {
-      await session.commitTransaction();
-      session.endSession();
-      return order;
-    }
-
-    // increment each product
-    for (const it of order.items) {
-      const pid = it.product && (it.product._id || it.product);
-      const qty = Number(it.quantity || 0);
-      if (!pid || qty <= 0) continue;
-      await changeProductStock(session, pid, +qty);
-    }
-
-    order.stockRestored = true;
-    await order.save({ session });
-
-    await session.commitTransaction();
-    session.endSession();
-    return order;
-  } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
-    throw err;
-  }
-}
-
 /* ---------------------- Routes ---------------------- */
 
 /**
@@ -1353,6 +1254,7 @@ router.post("/create", requiredSignIn, async (req, res) => {
       returnRefund: { status: "Not Requested" },
     });
 
+    // Generate OTP (backwards compatible) - optional
     const otp = generateOtp();
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
     newOrder.paymentVerification = {
@@ -1372,7 +1274,7 @@ router.post("/create", requiredSignIn, async (req, res) => {
       delete safeOrder.paymentVerification.otpExpires;
     }
 
-    // notify admin + user (non-blocking)
+    // Notifications (non-blocking)
     (async () => {
       try {
         const itemsHtml = formatItemsHtml(newOrder.items);
@@ -1435,9 +1337,7 @@ router.get("/public/:id", async (req, res) => {
       .populate("items.product", "title name images price")
       .populate("user", "name email");
 
-    if (!order) {
-      return res.status(404).json({ success: false, message: "Order not found" });
-    }
+    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
 
     const safe = order.toObject();
     if (safe.paymentVerification) {
@@ -1445,437 +1345,271 @@ router.get("/public/:id", async (req, res) => {
       delete safe.paymentVerification.otpExpires;
     }
 
-    return res.json({ success: true, order: safe });
+    res.json({ success: true, order: safe });
   } catch (err) {
     console.error("GET /public/:id error:", err);
-    return res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-/**
- * Get orders for a specific user (authenticated).
- * GET /api/orders/user/:userId
- */
-router.get("/user/:userId", requiredSignIn, async (req, res) => {
-  try {
-    const userId = req.params.userId;
-    const requestingUserId = req.user?.id || req.user?._id;
-    if (!requestingUserId) return res.status(401).json({ success: false, message: "Unauthorized" });
-
-    if (String(requestingUserId) !== String(userId) && req.user?.role !== "admin") {
-      return res.status(403).json({ success: false, message: "Forbidden" });
-    }
-
-    const orders = await Order.find({ user: userId })
-      .populate("items.product", "title name images price")
-      .populate("user", "name email");
-
-    const safe = orders.map((o) => {
-      const obj = o.toObject();
-      if (obj.paymentVerification) {
-        delete obj.paymentVerification.otp;
-        delete obj.paymentVerification.otpExpires;
-      }
-      return obj;
-    });
-
-    res.json({ success: true, orders: safe });
-  } catch (err) {
-    console.error("GET /user/:userId error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
 /**
- * Cancel order (owner or admin) - allowed if Pending or Accepted
+ * Public: send OTP for delivery to customer
+ * POST /api/orders/public/:id/send-otp
  */
-router.put("/cancel/:orderId", requiredSignIn, async (req, res) => {
+router.post("/public/:id/send-otp", async (req, res) => {
   try {
-    const { orderId } = req.params;
-    const order = await Order.findById(orderId).populate("items.product", "title name images price");
+    const { id } = req.params;
+    const { email } = req.body || {};
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ success: false, message: "Invalid order id" });
+
+    const order = await Order.findById(id).populate("user", "name email");
     if (!order) return res.status(404).json({ success: false, message: "Order not found" });
 
-    const requestingUserId = req.user?.id || req.user?._id;
-    const isOwner = String(order.user) === String(requestingUserId);
-    const adminFlag = req.user?.role === "admin";
+    const storedEmails = new Set();
+    if (order.user?.email) storedEmails.add(String(order.user.email).toLowerCase());
+    if (order.address?.email) storedEmails.add(String(order.address.email).toLowerCase());
 
-    if (!isOwner && !adminFlag) {
-      return res.status(403).json({ success: false, message: "Not authorized to cancel" });
-    }
-
-    if (!["Pending", "Accepted"].includes(order.status)) {
-      return res.status(400).json({ success: false, message: "Cannot cancel after shipping" });
-    }
-
-    order.status = "Cancelled";
-    await order.save();
-
-    // Notifications (non-blocking)
-    (async () => {
-      try {
-        const itemsHtml = formatItemsHtml(order.items);
-        const itemsText = formatItemsText(order.items);
-
-        const userEmail = order.address?.email || order.user?.email || null;
-        const userPhone = order.address?.mobileNo || null;
-        const adminEmail = process.env.ADMIN_EMAIL;
-        const adminPhone = process.env.ADMIN_PHONE;
-
-        const subjectUser = `[${process.env.APP_NAME || "App"}] Order cancelled (${order._id})`;
-        const htmlUser = `<p>Your order <strong>${order._id}</strong> has been cancelled.</p>${itemsHtml}<p><strong>Total:</strong> ₹${order.total}</p>`;
-        const smsUser = `${process.env.APP_NAME || "App"}: Order ${String(order._id).slice(-6)} cancelled.`;
-
-        await safeNotify({
-          mailTo: userEmail,
-          mailSubject: subjectUser,
-          mailHtml: htmlUser,
-          mailText: `Order ${order._id} cancelled.\n\n${itemsText}\n\nTotal: ₹${order.total}.`,
-          smsTo: userPhone,
-          smsBody: smsUser,
-        });
-
-        await safeNotify({
-          mailTo: adminEmail,
-          mailSubject: `[${process.env.APP_NAME || "App"}] Order cancelled ${order._id}`,
-          mailHtml: `<p>Order ${order._id} was cancelled by ${req.user?.id || "admin"}.</p>${itemsHtml}<p><strong>Total:</strong> ₹${order.total}</p>`,
-          mailText: `Order ${order._id} cancelled by ${req.user?.id || "admin"}.\n\n${itemsText}\n\nTotal: ₹${order.total}.`,
-          smsTo: adminPhone,
-          smsBody: `${process.env.APP_NAME || "App"}: Order ${String(order._id).slice(-6)} cancelled.`,
-        });
-      } catch (err) {
-        console.warn("Cancellation notification err:", err);
+    if (email) {
+      if (!storedEmails.size) {
+        return res.status(400).json({ success: false, message: "No customer email on record for this order" });
       }
-    })();
-
-    const safeObj = order.toObject();
-    if (safeObj.paymentVerification) {
-      delete safeObj.paymentVerification.otp;
-      delete safeObj.paymentVerification.otpExpires;
-    }
-
-    res.json({ success: true, message: "Order cancelled successfully", order: safeObj });
-  } catch (err) {
-    console.error("PUT /cancel/:orderId error:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-/**
- * Admin: update status (Accept / Shipped / Delivered / Cancelled etc.)
- * PUT /api/orders/status/:orderId
- */
-router.put("/status/:orderId", requiredSignIn, isAdmin, async (req, res) => {
-  try {
-    const { orderId } = req.params;
-    const { status } = req.body;
-    const allowed = ["Pending", "Accepted", "Confirmed", "Shipped", "Out for Delivery", "Delivered", "Cancelled", "Pending Pickup", "Collected"];
-    if (!allowed.includes(status)) return res.status(400).json({ success: false, message: "Invalid status" });
-
-    const order = await Order.findById(orderId).populate("user", "name email").populate("items.product", "title name images price");
-    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-
-    order.status = status;
-    await order.save();
-
-    // If admin marked Delivered, attempt to reduce stock (idempotent)
-    if (status === "Delivered") {
-      try {
-        await applyStockReductionForOrder(order._id);
-      } catch (stockErr) {
-        console.warn("Stock reduction warning:", stockErr);
-        // optional: set a warning flag on order object returned (but we will not fail the status update)
+      const normalized = String(email).trim().toLowerCase();
+      if (!storedEmails.has(normalized)) {
+        return res.status(403).json({ success: false, message: "Provided email does not match the order's customer email" });
       }
     }
 
-    await order.populate("items.product", "title name images price");
-    await order.populate("user", "name email");
+    const otp = generateOtp();
+    const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 min
 
-    const itemsHtml = formatItemsHtml(order.items);
-    const itemsText = formatItemsText(order.items);
+    order.paymentVerification = {
+      method: order.paymentVerification?.method || "Both",
+      otp,
+      otpExpires,
+      status: "Pending",
+      verifiedAt: null,
+    };
+
+    await order.save();
 
     (async () => {
       try {
-        const userEmail = order.user?.email;
+        const userEmail = email || order.user?.email || order.address?.email;
         const userPhone = order.address?.mobileNo;
-        const adminEmail = process.env.ADMIN_EMAIL;
-        const adminPhone = process.env.ADMIN_PHONE;
         const shortId = String(order._id).slice(-6);
+        const subject = `[${process.env.APP_NAME || "App"}] Your delivery OTP for order ${shortId}`;
+        const html = `<p>Your delivery OTP is <strong>${otp}</strong>. It expires in 10 minutes.</p>`;
+        const text = `Your delivery OTP is ${otp}. It expires in 10 minutes.`;
 
-        const subjectUser = `[${process.env.APP_NAME || "App"}] Order ${status} (${order._id})`;
-        const htmlUser = `<p>Your order <strong>${order._id}</strong> is now <strong>${status}</strong>.</p>${itemsHtml}<p><strong>Total:</strong> ₹${order.total}</p>`;
-        const smsUser = `${process.env.APP_NAME || "App"}: Order ${shortId} is ${status}.`;
+        if (userEmail) {
+          await safeNotify({
+            mailTo: userEmail,
+            mailSubject: subject,
+            mailHtml: html,
+            mailText: text,
+          });
+        }
 
-        await safeNotify({
-          mailTo: userEmail,
-          mailSubject: subjectUser,
-          mailHtml: htmlUser,
-          mailText: `Order ${order._id} is ${status}.\n\n${itemsText}\n\nTotal: ₹${order.total}.`,
-          smsTo: userPhone,
-          smsBody: smsUser,
-        });
-
-        await safeNotify({
-          mailTo: adminEmail,
-          mailSubject: `[${process.env.APP_NAME || "App"}] Order ${status} - ${order._id}`,
-          mailHtml: `<p>Order ${order._id} status changed to ${status} by admin.</p>${itemsHtml}<p><strong>Total:</strong> ₹${order.total}</p>`,
-          mailText: `Order ${order._id} status changed to ${status}.\n\n${itemsText}\n\nTotal: ₹${order.total}.`,
-          smsTo: adminPhone,
-          smsBody: `${process.env.APP_NAME || "App"}: Order ${shortId} marked ${status}.`,
-        });
-      } catch (err) {
-        console.warn("Status change notification error:", err);
+        if (userPhone) {
+          const sms = `${process.env.APP_NAME || "App"}: OTP ${otp} for order ${shortId}. Expires in 10 min.`;
+          await safeNotify({ smsTo: userPhone, smsBody: sms });
+        }
+      } catch (notifyErr) {
+        console.warn("public send-otp notify err:", notifyErr);
       }
     })();
 
-    const safeOrder = order.toObject();
-    if (safeOrder.paymentVerification) {
-      delete safeOrder.paymentVerification.otp;
-      delete safeOrder.paymentVerification.otpExpires;
+    const safe = order.toObject();
+    if (safe.paymentVerification) {
+      if (process.env.DEBUG === "true") {
+        safe.paymentVerification._debugOtp = order.paymentVerification.otp;
+      }
+      delete safe.paymentVerification.otp;
+      delete safe.paymentVerification.otpExpires;
     }
 
-    res.json({ success: true, message: "Order status updated", order: safeOrder });
+    res.json({ success: true, message: "OTP sent to customer (email/SMS) if available", order: safe });
   } catch (err) {
-    console.error("PUT /status/:orderId error:", err);
+    console.error("POST /public/:id/send-otp error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
 /**
- * Admin: get all orders (optional status filter)
- * GET /api/orders
+ * Public: mark delivered (token-aware; fallback to immediate deliver if no token)
+ * PUT /api/orders/public/:id/deliver
  */
-router.get("/", requiredSignIn, isAdmin, async (req, res) => {
+router.put("/public/:id/deliver", async (req, res) => {
   try {
-    const { status } = req.query;
-    const filter = status && status !== "All" ? { status } : {};
-    const orders = await Order.find(filter)
+    const { id } = req.params;
+    const providedToken = (req.body && req.body.token) || req.query.t || null;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ success: false, message: "Invalid order id" });
+
+    // Load order deliveryToken presence and status
+    const order = await Order.findById(id).select("deliveryToken status").lean();
+    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+    const now = new Date();
+
+    // If order has a delivery token configured, require token and consume it atomically
+    if (order.deliveryToken && order.deliveryToken.token) {
+      if (!providedToken) {
+        return res.status(400).json({ success: false, message: "Delivery token required" });
+      }
+
+      const filter = {
+        _id: id,
+        "deliveryToken.token": String(providedToken).trim(),
+        "deliveryToken.used": false,
+        status: { $ne: "Delivered" }
+      };
+      if (order.deliveryToken.expiresAt) filter["deliveryToken.expiresAt"] = { $gt: now };
+
+      const update = {
+        $set: {
+          status: "Delivered",
+          "paymentVerification.status": "Verified",
+          "paymentVerification.verifiedAt": now,
+          "deliveryToken.used": true,
+          "deliveryToken.usedAt": now,
+          updatedAt: now
+        }
+      };
+
+      const updated = await Order.findOneAndUpdate(filter, update, { new: true })
+        .populate("items.product", "title name images price")
+        .populate("user", "name email");
+
+      if (!updated) {
+        const current = await Order.findById(id).select("deliveryToken status").lean();
+        if (!current) return res.status(404).json({ success: false, message: "Order not found" });
+
+        if (current.status === "Delivered") {
+          const already = await Order.findById(id).populate("items.product", "title name images price").populate("user", "name email");
+          const safeAlready = already.toObject();
+          if (safeAlready.paymentVerification) {
+            delete safeAlready.paymentVerification.otp;
+            delete safeAlready.paymentVerification.otpExpires;
+          }
+          return res.json({ success: true, message: "Order already delivered", order: safeAlready });
+        }
+
+        if (!current.deliveryToken || !current.deliveryToken.token) {
+          return res.status(400).json({ success: false, message: "Delivery token not configured for this order" });
+        }
+        if (current.deliveryToken.used) {
+          return res.status(400).json({ success: false, message: "Delivery token already used" });
+        }
+        if (current.deliveryToken.expiresAt && new Date(current.deliveryToken.expiresAt) <= now) {
+          return res.status(400).json({ success: false, message: "Delivery token expired" });
+        }
+
+        return res.status(400).json({ success: false, message: "Invalid delivery token" });
+      }
+
+      const safe = updated.toObject();
+      if (safe.paymentVerification) {
+        delete safe.paymentVerification.otp;
+        delete safe.paymentVerification.otpExpires;
+      }
+
+      (async () => {
+        try {
+          const shortId = String(updated._id).slice(-6);
+          const userEmail = updated.user?.email || updated.address?.email;
+          const userPhone = updated.address?.mobileNo;
+          const adminEmail = process.env.ADMIN_EMAIL;
+          const adminPhone = process.env.ADMIN_PHONE;
+
+          await safeNotify({
+            mailTo: userEmail,
+            mailSubject: `[${process.env.APP_NAME || "App"}] Your order ${shortId} delivered`,
+            mailHtml: `<p>Your order <strong>${shortId}</strong> has been delivered.</p>`,
+            mailText: `Your order ${shortId} has been delivered.`,
+            smsTo: userPhone,
+            smsBody: `${process.env.APP_NAME || "App"}: Order ${shortId} delivered.`,
+          });
+
+          await safeNotify({
+            mailTo: adminEmail,
+            mailSubject: `[${process.env.APP_NAME || "App"}] Order ${shortId} delivered`,
+            mailHtml: `<p>Order ${shortId} was delivered via token-based scan.</p>`,
+            mailText: `Order ${shortId} delivered.`,
+            smsTo: adminPhone,
+            smsBody: `${process.env.APP_NAME || "App"}: Order ${shortId} delivered.`,
+          });
+        } catch (nerr) {
+          console.warn("public deliver (token) notify err:", nerr);
+        }
+      })();
+
+      return res.json({ success: true, message: "Order marked as delivered", order: safe });
+    }
+
+    // No token configured — fallback: immediate deliver
+    const updatedFallback = await Order.findOneAndUpdate(
+      { _id: id, status: { $ne: "Delivered" } },
+      { $set: { status: "Delivered", "paymentVerification.status": "Verified", "paymentVerification.verifiedAt": now, updatedAt: now } },
+      { new: true }
+    )
       .populate("items.product", "title name images price")
       .populate("user", "name email");
 
-    const safe = orders.map((o) => {
-      const obj = o.toObject();
-      if (obj.paymentVerification) {
-        delete obj.paymentVerification.otp;
-        delete obj.paymentVerification.otpExpires;
-      }
-      return obj;
-    });
-
-    res.json({ success: true, orders: safe });
-  } catch (err) {
-    console.error("GET / orders error:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-/**
- * Admin: get all return/refund requests
- * GET /api/orders/return-orders
- */
-router.get("/return-orders", requiredSignIn, isAdmin, async (req, res) => {
-  try {
-    const orders = await Order.find({ "returnRefund.status": { $in: ["Requested", "Approved", "Pending Pickup"] } })
-      .populate("items.product", "title images price")
-      .populate("user", "name email");
-
-    const safe = orders.map((o) => {
-      const obj = o.toObject();
-      if (obj.paymentVerification) {
-        delete obj.paymentVerification.otp;
-        delete obj.paymentVerification.otpExpires;
-      }
-      return obj;
-    });
-
-    res.json({ success: true, returnOrders: safe });
-  } catch (err) {
-    console.error("GET /return-orders error:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-/**
- * POST /api/orders/return/:orderId
- * Submit return/refund request (by user)
- */
-router.post("/return/:orderId", requiredSignIn, async (req, res) => {
-  try {
-    const { orderId } = req.params;
-    const { type, reason, upi } = req.body;
-    const userId = req.user?.id || req.user?._id;
-
-    const order = await Order.findById(orderId).populate("items.product", "title images price").populate("user", "name email");
-    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-
-    if (String(order.user) !== String(userId) && req.user?.role !== "admin") {
-      return res.status(403).json({ success: false, message: "Not authorized to request return for this order" });
-    }
-
-    if (order.status !== "Delivered") {
-      return res.status(400).json({ success: false, message: "Return/refund allowed only after delivery" });
-    }
-
-    if (!order.returnRefund) order.returnRefund = {};
-
-    order.returnRefund.requestType = type || "Refund";
-    order.returnRefund.reason = reason || "";
-    order.returnRefund.upi = upi || "";
-    order.returnRefund.status = "Requested";
-    order.returnRefund.requestDate = new Date();
-
-    await order.save();
-    await order.populate("items.product", "title images price");
-    await order.populate("user", "name email");
-
-    (async () => {
-      try {
-        const adminEmail = process.env.ADMIN_EMAIL;
-        const adminPhone = process.env.ADMIN_PHONE;
-        const itemsHtml = formatItemsHtml(order.items);
-        const itemsText = formatItemsText(order.items);
-        const subj = `[${process.env.APP_NAME || "App"}] Return requested (${order._id})`;
-        await safeNotify({
-          mailTo: adminEmail,
-          mailSubject: subj,
-          mailHtml: `<p>Return requested for order ${order._id}</p>${itemsHtml}<p>Reason: ${order.returnRefund.reason}</p>`,
-          mailText: `Return requested for order ${order._id}\n\n${itemsText}`,
-          smsTo: adminPhone,
-          smsBody: `${process.env.APP_NAME || "App"}: Return requested for order ${String(order._id).slice(-6)}.`,
-        });
-
-        const userEmail = order.user?.email;
-        const userPhone = order.address?.mobileNo;
-        if (userEmail || userPhone) {
-          await safeNotify({
-            mailTo: userEmail,
-            mailSubject: `[${process.env.APP_NAME || "App"}] Return request received (${order._id})`,
-            mailHtml: `<p>Return request received for ${order._id}. We'll update you shortly.</p>${itemsHtml}`,
-            mailText: `Return request received for ${order._id}.\n\n${itemsText}`,
-            smsTo: userPhone,
-            smsBody: `${process.env.APP_NAME || "App"}: Return request received for order ${String(order._1).slice(-6)}.`,
-          });
+    if (!updatedFallback) {
+      const maybe = await Order.findById(id).populate("user", "name email");
+      if (!maybe) return res.status(404).json({ success: false, message: "Order not found" });
+      if (maybe.status === "Delivered") {
+        const safeAlready = maybe.toObject();
+        if (safeAlready.paymentVerification) {
+          delete safeAlready.paymentVerification.otp;
+          delete safeAlready.paymentVerification.otpExpires;
         }
-      } catch (err) {
-        console.warn("return notify err:", err);
+        return res.json({ success: true, message: "Order already delivered", order: safeAlready });
       }
-    })();
-
-    const safe = order.toObject();
-    if (safe.paymentVerification) {
-      delete safe.paymentVerification.otp;
-      delete safe.paymentVerification.otpExpires;
+      return res.status(400).json({ success: false, message: "Failed to mark delivered" });
     }
 
-    res.json({ success: true, message: "Return/refund request submitted", order: safe });
-  } catch (err) {
-    console.error("POST /return/:orderId error:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-/**
- * Admin: Approve / Reject / Mark Collected for return/refund
- * PUT /api/orders/return/:orderId
- */
-router.put("/return/:orderId", requiredSignIn, isAdmin, async (req, res) => {
-  try {
-    const { orderId } = req.params;
-    const { action } = req.body;
-    if (!["Approved", "Rejected", "Collected"].includes(action)) {
-      return res.status(400).json({ success: false, message: "Invalid action" });
-    }
-
-    const order = await Order.findById(orderId).populate("items.product", "title images price").populate("user", "name email");
-    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-
-    if (!order.returnRefund) order.returnRefund = { status: "Not Requested" };
-
-    if (action === "Approved") {
-      order.returnRefund.status = "Approved";
-      order.returnRefund.acceptedBy = req.user?.id || req.user?._id || null;
-      order.returnRefund.acceptedAt = new Date();
-      order.status = "Pending Pickup";
-    } else if (action === "Rejected") {
-      order.returnRefund.status = "Rejected";
-    } else if (action === "Collected") {
-      order.returnRefund.status = "Collected";
-      order.returnRefund.collectedAt = new Date();
-      order.status = "Collected";
-    }
-
-    await order.save();
-    await order.populate("items.product", "title images price");
-    await order.populate("user", "name email");
-
-    // If collection is performed, restore stock (idempotent)
-    if (action === "Collected") {
-      try {
-        await applyStockRestoreForOrder(order._id);
-      } catch (stockErr) {
-        console.warn("Stock restore after collection failed:", stockErr);
-        // optional: you can choose to return an error here instead of warning
-      }
+    const safeFallback = updatedFallback.toObject();
+    if (safeFallback.paymentVerification) {
+      delete safeFallback.paymentVerification.otp;
+      delete safeFallback.paymentVerification.otpExpires;
     }
 
     (async () => {
       try {
-        const userEmail = order.user?.email;
-        const userPhone = order.address?.mobileNo;
+        const shortId = String(updatedFallback._id).slice(-6);
+        const userEmail = updatedFallback.user?.email || updatedFallback.address?.email;
+        const userPhone = updatedFallback.address?.mobileNo;
         const adminEmail = process.env.ADMIN_EMAIL;
         const adminPhone = process.env.ADMIN_PHONE;
-        const itemsHtml = formatItemsHtml(order.items);
-        if (action === "Approved") {
-          await safeNotify({
-            mailTo: userEmail,
-            mailSubject: `[${process.env.APP_NAME || "App"}] Your return request approved (${order._id})`,
-            mailHtml: `<p>Your return for ${order._1} is approved.</p>${itemsHtml}`,
-            mailText: `Your return for ${order._id} is approved.`,
-            smsTo: userPhone,
-            smsBody: `${process.env.APP_NAME || "App"}: Return approved for order ${String(order._id).slice(-6)}.`,
-          });
-        } else if (action === "Rejected") {
-          await safeNotify({
-            mailTo: userEmail,
-            mailSubject: `[${process.env.APP_NAME || "App"}] Your return request rejected (${order._id})`,
-            mailHtml: `<p>Your return for ${order._id} was rejected.</p>${itemsHtml}`,
-            mailText: `Your return for ${order._id} was rejected.`,
-            smsTo: userPhone,
-            smsBody: `${process.env.APP_NAME || "App"}: Return rejected for order ${String(order._id).slice(-6)}.`,
-          });
-        } else if (action === "Collected") {
-          await safeNotify({
-            mailTo: userEmail,
-            mailSubject: `[${process.env.APP_NAME || "App"}] Return collected (${order._id})`,
-            mailHtml: `<p>Pickup collected for ${order._id}.</p>${itemsHtml}`,
-            mailText: `Pickup collected for ${order._id}.`,
-            smsTo: userPhone,
-            smsBody: `${process.env.APP_NAME || "App"}: Return collected for order ${String(order._id).slice(-6)}.`,
-          });
-        }
+
+        await safeNotify({
+          mailTo: userEmail,
+          mailSubject: `[${process.env.APP_NAME || "App"}] Your order ${shortId} delivered`,
+          mailHtml: `<p>Your order <strong>${shortId}</strong> has been delivered.</p>`,
+          mailText: `Your order ${shortId} has been delivered.`,
+          smsTo: userPhone,
+          smsBody: `${process.env.APP_NAME || "App"}: Order ${shortId} delivered.`,
+        });
 
         await safeNotify({
           mailTo: adminEmail,
-          mailSubject: `[${process.env.APP_NAME || "App"}] Return ${action} - ${order._id}`,
-          mailHtml: `<p>Return ${action} for ${order._id}</p>`,
-          mailText: `Return ${action} for ${order._id}`,
+          mailSubject: `[${process.env.APP_NAME || "App"}] Order ${shortId} delivered`,
+          mailHtml: `<p>Order ${shortId} was delivered via public deliver endpoint.</p>`,
+          mailText: `Order ${shortId} delivered.`,
           smsTo: adminPhone,
-          smsBody: `${process.env.APP_NAME || "App"}: Return ${action} for ${String(order._id).slice(-6)}.`,
+          smsBody: `${process.env.APP_NAME || "App"}: Order ${shortId} delivered.`,
         });
-      } catch (err) {
-        console.warn("return action notify err:", err);
+      } catch (nerr) {
+        console.warn("public deliver (fallback) notify err:", nerr);
       }
     })();
 
-    const safe = order.toObject();
-    if (safe.paymentVerification) {
-      delete safe.paymentVerification.otp;
-      delete safe.paymentVerification.otpExpires;
-    }
-
-    res.json({ success: true, message: "Return/refund updated", order: safe });
+    return res.json({ success: true, message: "Order marked as delivered", order: safeFallback });
   } catch (err) {
-    console.error("PUT /return/:orderId error:", err);
-    res.status(500).json({ success: false, message: err.message });
+    console.error("PUT /public/:id/deliver error:", err);
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -1938,176 +1672,82 @@ router.post("/resend-otp/:orderId", requiredSignIn, async (req, res) => {
 });
 
 /**
- * Public: send OTP for delivery to customer
- * POST /api/orders/public/:id/send-otp
+ * Verify payment OTP manually (optional)
+ * POST /api/orders/verify-payment/:orderId  Body: { otp }
  */
-router.post("/public/:id/send-otp", async (req, res) => {
+router.post("/verify-payment/:orderId", requiredSignIn, async (req, res) => {
   try {
-    const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ success: false, message: "Invalid order id" });
+    const { orderId } = req.params;
+    const { otp } = req.body;
+    if (!otp) return res.status(400).json({ success: false, message: "OTP required" });
 
-    const order = await Order.findById(id).populate("user", "name email");
+    if (!mongoose.Types.ObjectId.isValid(orderId)) return res.status(400).json({ success: false, message: "Invalid order id" });
+
+    const order = await Order.findById(orderId).populate("user", "name email");
     if (!order) return res.status(404).json({ success: false, message: "Order not found" });
 
-    const otp = generateOtp();
-    const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+    const requestingUserId = req.user?.id || req.user?._id;
+    if (String(order.user) !== String(requestingUserId) && req.user?.role !== "admin") {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
 
-    order.paymentVerification = {
-      method: order.paymentVerification?.method || "Both",
-      otp,
-      otpExpires,
-      status: "Pending",
-      verifiedAt: null,
-    };
+    if (!order.paymentVerification || !order.paymentVerification.otp) return res.status(400).json({ success: false, message: "No OTP for this order" });
+    if (order.paymentVerification.otpExpires && new Date() > new Date(order.paymentVerification.otpExpires)) return res.status(400).json({ success: false, message: "OTP expired. Resend and try again." });
+    if (String(order.paymentVerification.otp).trim() !== String(otp).trim()) return res.status(400).json({ success: false, message: "Invalid OTP" });
 
+    order.paymentVerification.status = "Verified";
+    order.paymentVerification.verifiedAt = new Date();
     await order.save();
+    await order.populate("items.product", "title images price");
+    await order.populate("user", "name email");
+
+    const safe = order.toObject();
+    if (safe.paymentVerification) {
+      delete safe.paymentVerification.otp;
+      delete safe.paymentVerification.otpExpires;
+    }
 
     (async () => {
       try {
         const userEmail = order.user?.email || order.address?.email;
         const userPhone = order.address?.mobileNo;
-        const shortId = String(order._id).slice(-6);
-        const subject = `[${process.env.APP_NAME || "App"}] Your delivery OTP for order ${shortId}`;
-        const html = `<p>Your delivery OTP is <strong>${otp}</strong>. It expires in 10 minutes.</p>`;
-        const text = `Your delivery OTP is ${otp}. It expires in 10 minutes.`;
-        const sms = `${process.env.APP_NAME || "App"}: OTP ${otp} for order ${shortId}. Expires in 10 min.`;
-
-        await safeNotify({
-          mailTo: userEmail,
-          mailSubject: subject,
-          mailHtml: html,
-          mailText: text,
-          smsTo: userPhone,
-          smsBody: sms,
-        });
-      } catch (notifyErr) {
-        console.warn("public send-otp notify err:", notifyErr);
-      }
-    })();
-
-    const safe = order.toObject();
-    if (safe.paymentVerification) {
-      if (process.env.DEBUG === "true") {
-        safe.paymentVerification._debugOtp = order.paymentVerification.otp;
-      }
-      delete safe.paymentVerification.otp;
-      delete safe.paymentVerification.otpExpires;
-    }
-
-    res.json({ success: true, message: "OTP sent to customer (email/SMS) if available", order: safe });
-  } catch (err) {
-    console.error("POST /public/:id/send-otp error:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-/**
- * Public: verify OTP and mark delivered (atomic)
- * PUT /api/orders/public/:id/deliver
- * Body: { otp: "123456" }
- */
-router.put("/public/:id/deliver", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { otp } = req.body;
-    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ success: false, message: "Invalid order id" });
-    if (!otp) return res.status(400).json({ success: false, message: "OTP required" });
-
-    const now = new Date();
-
-    const updated = await Order.findOneAndUpdate(
-      {
-        _id: id,
-        "paymentVerification.otp": String(otp).trim(),
-        "paymentVerification.otpExpires": { $gt: now }
-      },
-      {
-        $set: {
-          "paymentVerification.status": "Verified",
-          "paymentVerification.verifiedAt": now,
-          status: "Delivered",
-          updatedAt: now
-        }
-      },
-      { new: true }
-    )
-      .populate("items.product", "title name images price")
-      .populate("user", "name email");
-
-    if (!updated) {
-      const order = await Order.findById(id).populate("user", "name email");
-      if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-
-      if (!order.paymentVerification || !order.paymentVerification.otp) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "No OTP configured for this order. Use /api/orders/public/:id/send-otp to send one to the customer."
-        });
-      }
-      if (order.paymentVerification.otpExpires && new Date() > new Date(order.paymentVerification.otpExpires)) {
-        return res.status(400).json({ success: false, message: "OTP expired. Please request a new OTP." });
-      }
-      return res.status(400).json({ success: false, message: "Invalid OTP" });
-    }
-
-    const safe = updated.toObject();
-    if (safe.paymentVerification) {
-      delete safe.paymentVerification.otp;
-      delete safe.paymentVerification.otpExpires;
-    }
-
-    // Attempt stock reduction after marking delivered
-    try {
-      await applyStockReductionForOrder(updated._id);
-    } catch (stockErr) {
-      console.warn("Stock reduction after public deliver failed:", stockErr);
-      safe._stockWarning = stockErr.message;
-    }
-
-    (async () => {
-      try {
-        const shortId = String(updated._id).slice(-6);
-        const userEmail = updated.user?.email || updated.address?.email;
-        const userPhone = updated.address?.mobileNo;
         const adminEmail = process.env.ADMIN_EMAIL;
         const adminPhone = process.env.ADMIN_PHONE;
 
-        await safeNotify({
-          mailTo: userEmail,
-          mailSubject: `[${process.env.APP_NAME || "App"}] Your order ${shortId} delivered`,
-          mailHtml: `<p>Your order <strong>${shortId}</strong> has been delivered.</p>`,
-          mailText: `Your order ${shortId} has been delivered.`,
-          smsTo: userPhone,
-          smsBody: `${process.env.APP_NAME || "App"}: Order ${shortId} delivered.`,
-        });
+        if (userEmail || userPhone) {
+          await safeNotify({
+            mailTo: userEmail,
+            mailSubject: `[${process.env.APP_NAME || "App"}] Verified for order ${order._id}`,
+            mailHtml: `<p>Your verification for order <strong>${order._id}</strong> is successful.</p>`,
+            mailText: `Verification for order ${order._id} successful.`,
+            smsTo: userPhone,
+            smsBody: `${process.env.APP_NAME || "App"}: Verified for order ${String(order._id).slice(-6)}.`,
+          });
+        }
 
         await safeNotify({
           mailTo: adminEmail,
-          mailSubject: `[${process.env.APP_NAME || "App"}] Order ${shortId} delivered`,
-          mailHtml: `<p>Order ${shortId} marked delivered via public deliver endpoint.</p>`,
-          mailText: `Order ${shortId} delivered.`,
+          mailSubject: `[${process.env.APP_NAME || "App"}] Order payment verified - ${order._id}`,
+          mailHtml: `<p>Order ${order._id} payment verification successful.</p>`,
+          mailText: `Order ${order._id} payment verification successful.`,
           smsTo: adminPhone,
-          smsBody: `${process.env.APP_NAME || "App"}: Order ${shortId} delivered.`,
+          smsBody: `${process.env.APP_NAME || "App"}: Payment verified for ${String(order._id).slice(-6)}.`,
         });
-      } catch (nerr) {
-        console.warn("public deliver notify err:", nerr);
+      } catch (err) {
+        console.warn("verify notify err:", err);
       }
     })();
 
-    return res.json({ success: true, message: "Order marked as delivered", order: safe });
+    res.json({ success: true, message: "Payment verified", order: safe });
   } catch (err) {
-    console.error("PUT /public/:id/deliver error:", err);
+    console.error("POST /verify-payment error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-/* ---------------------- PROTECTED deliver endpoint (for auth'ed users) ---------------------- */
-
 /**
- * Mark delivered (protected) - atomic OTP verification for non-admins
+ * Protected deliver (authenticated users: admin/courier/owner) - unchanged
  * PUT /api/orders/:orderId/deliver
- * Body: { otp?: "123456" } - admins bypass OTP
  */
 router.put("/:orderId/deliver", requiredSignIn, async (req, res) => {
   try {
@@ -2120,7 +1760,6 @@ router.put("/:orderId/deliver", requiredSignIn, async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid order id" });
     }
 
-    // Admins should be able to mark delivered without OTP.
     if (isAdminUser) {
       const updated = await Order.findByIdAndUpdate(
         orderId,
@@ -2137,18 +1776,9 @@ router.put("/:orderId/deliver", requiredSignIn, async (req, res) => {
         delete safe.paymentVerification.otp;
         delete safe.paymentVerification.otpExpires;
       }
-
-      try {
-        await applyStockReductionForOrder(updated._id);
-      } catch (stockErr) {
-        console.warn("Stock reduction after admin protected deliver failed:", stockErr);
-        safe._stockWarning = stockErr.message;
-      }
-
       return res.json({ success: true, message: "Order marked delivered by admin", order: safe });
     }
 
-    // Non-admin: must be owner or courier
     const order = await Order.findById(orderId).populate("user", "name email");
     if (!order) return res.status(404).json({ success: false, message: "Order not found" });
 
@@ -2201,13 +1831,6 @@ router.put("/:orderId/deliver", requiredSignIn, async (req, res) => {
       delete safe.paymentVerification.otpExpires;
     }
 
-    try {
-      await applyStockReductionForOrder(updated._id);
-    } catch (stockErr) {
-      console.warn("Stock reduction after protected deliver failed:", stockErr);
-      safe._stockWarning = stockErr.message;
-    }
-
     (async () => {
       try {
         const shortId = String(updated._id).slice(-6);
@@ -2241,6 +1864,449 @@ router.put("/:orderId/deliver", requiredSignIn, async (req, res) => {
     return res.json({ success: true, message: "Order marked as delivered", order: safe });
   } catch (err) {
     console.error("PUT /:orderId/deliver error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * Admin: update status
+ * PUT /api/orders/status/:orderId
+ */
+router.put("/status/:orderId", requiredSignIn, isAdmin, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { status } = req.body;
+    const allowed = ["Pending", "Accepted", "Confirmed", "Shipped", "Out for Delivery", "Delivered", "Cancelled", "Pending Pickup", "Collected"];
+    if (!allowed.includes(status)) return res.status(400).json({ success: false, message: "Invalid status" });
+
+    const order = await Order.findById(orderId).populate("user", "name email").populate("items.product", "title name images price");
+    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+    order.status = status;
+    await order.save();
+    await order.populate("items.product", "title name images price");
+    await order.populate("user", "name email");
+
+    const itemsHtml = formatItemsHtml(order.items);
+    const itemsText = formatItemsText(order.items);
+
+    (async () => {
+      try {
+        const userEmail = order.user?.email;
+        const userPhone = order.address?.mobileNo;
+        const adminEmail = process.env.ADMIN_EMAIL;
+        const adminPhone = process.env.ADMIN_PHONE;
+        const shortId = String(order._id).slice(-6);
+
+        const subjectUser = `[${process.env.APP_NAME || "App"}] Order ${status} (${order._id})`;
+        const htmlUser = `<p>Your order <strong>${order._id}</strong> is now <strong>${status}</strong>.</p>${itemsHtml}<p><strong>Total:</strong> ₹${order.total}</p>`;
+        const smsUser = `${process.env.APP_NAME || "App"}: Order ${shortId} is ${status}.`;
+
+        await safeNotify({
+          mailTo: userEmail,
+          mailSubject: subjectUser,
+          mailHtml: htmlUser,
+          mailText: `Order ${order._id} is ${status}.\n\n${itemsText}\n\nTotal: ₹${order.total}.`,
+          smsTo: userPhone,
+          smsBody: smsUser,
+        });
+
+        await safeNotify({
+          mailTo: adminEmail,
+          mailSubject: `[${process.env.APP_NAME || "App"}] Order ${status} - ${order._id}`,
+          mailHtml: `<p>Order ${order._id} status changed to ${status} by admin.</p>${itemsHtml}<p><strong>Total:</strong> ₹${order.total}</p>`,
+          mailText: `Order ${order._id} status changed to ${status}.\n\n${itemsText}\n\nTotal: ₹${order.total}.`,
+          smsTo: adminPhone,
+          smsBody: `${process.env.APP_NAME || "App"}: Order ${shortId} marked ${status}.`,
+        });
+      } catch (err) {
+        console.warn("Status change notification error:", err);
+      }
+    })();
+
+    const safeOrder = order.toObject();
+    if (safeOrder.paymentVerification) {
+      delete safeOrder.paymentVerification.otp;
+      delete safeOrder.paymentVerification.otpExpires;
+    }
+
+    res.json({ success: true, message: "Order status updated", order: safeOrder });
+  } catch (err) {
+    console.error("PUT /status/:orderId error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * POST /api/orders/return/:orderId
+ * Submit return/refund request (by user)
+ */
+router.post("/return/:orderId", requiredSignIn, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { type, reason, upi } = req.body;
+    const userId = req.user?.id || req.user?._id;
+
+    const order = await Order.findById(orderId).populate("items.product", "title images price").populate("user", "name email");
+    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+    if (String(order.user) !== String(userId) && req.user?.role !== "admin") {
+  return res.status(403).json({ success: false, message: "Not authorized to request return for this order" });
+}
+
+    if (order.status !== "Delivered") {
+      return res.status(400).json({ success: false, message: "Return/refund allowed only after delivery" });
+    }
+
+    if (!order.returnRefund) order.returnRefund = {};
+
+    order.returnRefund.requestType = type || "Refund";
+    order.returnRefund.reason = reason || "";
+    order.returnRefund.upi = upi || "";
+    order.returnRefund.status = "Requested";
+    order.returnRefund.requestDate = new Date();
+
+    await order.save();
+    await order.populate("items.product", "title images price");
+    await order.populate("user", "name email");
+
+    (async () => {
+      try {
+        const adminEmail = process.env.ADMIN_EMAIL;
+        const adminPhone = process.env.ADMIN_PHONE;
+        const itemsHtml = formatItemsHtml(order.items);
+        const itemsText = formatItemsText(order.items);
+        const subj = `[${process.env.APP_NAME || "App"}] Return requested (${order._id})`;
+        await safeNotify({
+          mailTo: adminEmail,
+          mailSubject: subj,
+          mailHtml: `<p>Return requested for order ${order._id}</p>${itemsHtml}<p>Reason: ${order.returnRefund.reason}</p>`,
+          mailText: `Return requested for order ${order._id}\n\n${itemsText}`,
+          smsTo: adminPhone,
+          smsBody: `${process.env.APP_NAME || "App"}: Return requested for order ${String(order._id).slice(-6)}.`,
+        });
+
+        const userEmail = order.user?.email;
+        const userPhone = order.address?.mobileNo;
+        if (userEmail || userPhone) {
+          await safeNotify({
+            mailTo: userEmail,
+            mailSubject: `[${process.env.APP_NAME || "App"}] Return request received (${order._id})`,
+            mailHtml: `<p>Return request received for ${order._id}. We'll update you shortly.</p>${itemsHtml}`,
+            mailText: `Return request received for ${order._id}.\n\n${itemsText}`,
+            smsTo: userPhone,
+            smsBody: `${process.env.APP_NAME || "App"}: Return request received for order ${String(order._id).slice(-6)}.`,
+          });
+        }
+      } catch (err) {
+        console.warn("return notify err:", err);
+      }
+    })();
+
+    const safe = order.toObject();
+    if (safe.paymentVerification) {
+      delete safe.paymentVerification.otp;
+      delete safe.paymentVerification.otpExpires;
+    }
+
+    res.json({ success: true, message: "Return/refund request submitted", order: safe });
+  } catch (err) {
+    console.error("POST /return/:orderId error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * Admin: Approve / Reject / Mark Collected for return/refund
+ * PUT /api/orders/return/:orderId
+ */
+router.put("/return/:orderId", requiredSignIn, isAdmin, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { action } = req.body;
+    if (!["Approved", "Rejected", "Collected"].includes(action)) {
+      return res.status(400).json({ success: false, message: "Invalid action" });
+    }
+
+    const order = await Order.findById(orderId).populate("items.product", "title images price").populate("user", "name email");
+    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+    if (!order.returnRefund) order.returnRefund = { status: "Not Requested" };
+
+    if (action === "Approved") {
+      order.returnRefund.status = "Approved";
+      order.returnRefund.acceptedBy = req.user?.id || req.user?._id || null;
+      order.returnRefund.acceptedAt = new Date();
+      order.status = "Pending Pickup";
+    } else if (action === "Rejected") {
+      order.returnRefund.status = "Rejected";
+    } else if (action === "Collected") {
+      order.returnRefund.status = "Collected";
+      order.returnRefund.collectedAt = new Date();
+      order.status = "Collected";
+    }
+
+    await order.save();
+    await order.populate("items.product", "title images price");
+    await order.populate("user", "name email");
+
+    (async () => {
+      try {
+        const userEmail = order.user?.email;
+        const userPhone = order.address?.mobileNo;
+        const adminEmail = process.env.ADMIN_EMAIL;
+        const adminPhone = process.env.ADMIN_PHONE;
+        const itemsHtml = formatItemsHtml(order.items);
+        if (action === "Approved") {
+          await safeNotify({
+            mailTo: userEmail,
+            mailSubject: `[${process.env.APP_NAME || "App"}] Your return request approved (${order._id})`,
+            mailHtml: `<p>Your return for ${order._id} is approved.</p>${itemsHtml}`,
+            mailText: `Your return for ${order._id} is approved.`,
+            smsTo: userPhone,
+            smsBody: `${process.env.APP_NAME || "App"}: Return approved for order ${String(order._id).slice(-6)}.`,
+          });
+        } else if (action === "Rejected") {
+          await safeNotify({
+            mailTo: userEmail,
+            mailSubject: `[${process.env.APP_NAME || "App"}] Your return request rejected (${order._id})`,
+            mailHtml: `<p>Your return for ${order._id} was rejected.</p>${itemsHtml}`,
+            mailText: `Your return for ${order._id} was rejected.`,
+            smsTo: userPhone,
+            smsBody: `${process.env.APP_NAME || "App"}: Return rejected for order ${String(order._id).slice(-6)}.`,
+          });
+        } else if (action === "Collected") {
+          await safeNotify({
+            mailTo: userEmail,
+            mailSubject: `[${process.env.APP_NAME || "App"}] Return collected (${order._id})`,
+            mailHtml: `<p>Pickup collected for ${order._id}.</p>${itemsHtml}`,
+            mailText: `Pickup collected for ${order._id}.`,
+            smsTo: userPhone,
+            smsBody: `${process.env.APP_NAME || "App"}: Return collected for order ${String(order._id).slice(-6)}.`,
+          });
+        }
+
+        await safeNotify({
+          mailTo: adminEmail,
+          mailSubject: `[${process.env.APP_NAME || "App"}] Return ${action} - ${order._id}`,
+          mailHtml: `<p>Return ${action} for ${order._id}</p>`,
+          mailText: `Return ${action} for ${order._id}`,
+          smsTo: adminPhone,
+          smsBody: `${process.env.APP_NAME || "App"}: Return ${action} for order ${String(order._id).slice(-6)}.`,
+        });
+      } catch (err) {
+        console.warn("return action notify err:", err);
+      }
+    })();
+
+    const safe = order.toObject();
+    if (safe.paymentVerification) {
+      delete safe.paymentVerification.otp;
+      delete safe.paymentVerification.otpExpires;
+    }
+
+    res.json({ success: true, message: "Return/refund updated", order: safe });
+  } catch (err) {
+    console.error("PUT /return/:orderId error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * Admin: generate or reset single-use delivery token for an order
+ * POST /api/orders/:orderId/generate-delivery-token
+ * Body: { ttlMinutes?: number }
+ */
+router.post("/:orderId/generate-delivery-token", requiredSignIn, isAdmin, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(orderId)) return res.status(400).json({ success: false, message: "Invalid order id" });
+
+    const ttlMinutes = parseInt(req.body.ttlMinutes) || 60 * 24 * 7; // default 7 days
+    const token = generateDeliveryToken(10);
+    const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
+
+    const updated = await Order.findByIdAndUpdate(
+      orderId,
+      {
+        $set: {
+          "deliveryToken.token": token,
+          "deliveryToken.expiresAt": expiresAt,
+          "deliveryToken.used": false,
+          "deliveryToken.usedAt": null,
+          "deliveryToken.createdAt": new Date()
+        }
+      },
+      { new: true }
+    );
+
+    if (!updated) return res.status(404).json({ success: false, message: "Order not found" });
+
+    return res.json({ success: true, message: "Delivery token generated", token, expiresAt, orderId });
+  } catch (err) {
+    console.error("POST /:orderId/generate-delivery-token error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * Admin: get all orders (optional status filter)
+ * GET /api/orders
+ */
+router.get("/", requiredSignIn, isAdmin, async (req, res) => {
+  try {
+    const { status } = req.query;
+    const filter = status && status !== "All" ? { status } : {};
+    const orders = await Order.find(filter)
+      .populate("items.product", "title name images price")
+      .populate("user", "name email");
+
+    const safe = orders.map((o) => {
+      const obj = o.toObject();
+      if (obj.paymentVerification) {
+        delete obj.paymentVerification.otp;
+        delete obj.paymentVerification.otpExpires;
+      }
+      return obj;
+    });
+
+    res.json({ success: true, orders: safe });
+  } catch (err) {
+    console.error("GET / orders error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * Admin: get all return/refund requests
+ * GET /api/orders/return-orders
+ */
+router.get("/return-orders", requiredSignIn, isAdmin, async (req, res) => {
+  try {
+    const orders = await Order.find({ "returnRefund.status": { $in: ["Requested", "Approved", "Pending Pickup"] } })
+      .populate("items.product", "title images price")
+      .populate("user", "name email");
+
+    const safe = orders.map((o) => {
+      const obj = o.toObject();
+      if (obj.paymentVerification) {
+        delete obj.paymentVerification.otp;
+        delete obj.paymentVerification.otpExpires;
+      }
+      return obj;
+    });
+
+    res.json({ success: true, returnOrders: safe });
+  } catch (err) {
+    console.error("GET /return-orders error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * Get orders for a specific user (authenticated).
+ * GET /api/orders/user/:userId
+ */
+router.get("/user/:userId", requiredSignIn, async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const requestingUserId = req.user?.id || req.user?._id;
+    if (!requestingUserId) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+    if (String(requestingUserId) !== String(userId) && req.user?.role !== "admin") {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+
+    const orders = await Order.find({ user: userId })
+      .populate("items.product", "title name images price")
+      .populate("user", "name email");
+
+    const safe = orders.map((o) => {
+      const obj = o.toObject();
+      if (obj.paymentVerification) {
+        delete obj.paymentVerification.otp;
+        delete obj.paymentVerification.otpExpires;
+      }
+      return obj;
+    });
+
+    res.json({ success: true, orders: safe });
+  } catch (err) {
+    console.error("GET /user/:userId error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * Cancel order (owner or admin) - allowed if Pending or Accepted
+ * PUT /api/orders/cancel/:orderId
+ */
+router.put("/cancel/:orderId", requiredSignIn, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const order = await Order.findById(orderId).populate("items.product", "title name images price");
+    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+    const requestingUserId = req.user?.id || req.user?._id;
+    const isOwner = String(order.user) === String(requestingUserId);
+    const adminFlag = req.user?.role === "admin";
+
+    if (!isOwner && !adminFlag) {
+      return res.status(403).json({ success: false, message: "Not authorized to cancel" });
+    }
+
+    if (!["Pending", "Accepted"].includes(order.status)) {
+      return res.status(400).json({ success: false, message: "Cannot cancel after shipping" });
+    }
+
+    order.status = "Cancelled";
+    await order.save();
+
+    (async () => {
+      try {
+        const itemsHtml = formatItemsHtml(order.items);
+        const itemsText = formatItemsText(order.items);
+
+        const userEmail = order.address?.email || order.user?.email || null;
+        const userPhone = order.address?.mobileNo || null;
+        const adminEmail = process.env.ADMIN_EMAIL;
+        const adminPhone = process.env.ADMIN_PHONE;
+
+        const subjectUser = `[${process.env.APP_NAME || "App"}] Order cancelled (${order._id})`;
+        const htmlUser = `<p>Your order <strong>${order._id}</strong> has been cancelled.</p>${itemsHtml}<p><strong>Total:</strong> ₹${order.total}</p>`;
+        const smsUser = `${process.env.APP_NAME || "App"}: Order ${String(order._id).slice(-6)} cancelled.`;
+
+        await safeNotify({
+          mailTo: userEmail,
+          mailSubject: subjectUser,
+          mailHtml: htmlUser,
+          mailText: `Order ${order._id} cancelled.\n\n${itemsText}\n\nTotal: ₹${order.total}.`,
+          smsTo: userPhone,
+          smsBody: smsUser,
+        });
+
+        await safeNotify({
+          mailTo: adminEmail,
+          mailSubject: `[${process.env.APP_NAME || "App"}] Order cancelled ${order._id}`,
+          mailHtml: `<p>Order ${order._id} was cancelled by ${req.user?.id || "admin"}.</p>${itemsHtml}<p><strong>Total:</strong> ₹${order.total}</p>`,
+          mailText: `Order ${order._id} cancelled by ${req.user?.id || "admin"}.\n\n${itemsText}\n\nTotal: ₹${order.total}.`,
+          smsTo: adminPhone,
+          smsBody: `${process.env.APP_NAME || "App"}: Order ${String(order._id).slice(-6)} cancelled.`,
+        });
+      } catch (err) {
+        console.warn("Cancellation notification err:", err);
+      }
+    })();
+
+    const safeObj = order.toObject();
+    if (safeObj.paymentVerification) {
+      delete safeObj.paymentVerification.otp;
+      delete safeObj.paymentVerification.otpExpires;
+    }
+
+    res.json({ success: true, message: "Order cancelled successfully", order: safeObj });
+  } catch (err) {
+    console.error("PUT /cancel/:orderId error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });

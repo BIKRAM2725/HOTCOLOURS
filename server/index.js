@@ -20,6 +20,10 @@ import paymentsRouter from "./src/routes/payments.js";
 
 
 
+
+
+
+
 dotenv.config(); // load .env
 
 // connect DB before starting app (optional but convenient)
@@ -55,6 +59,7 @@ app.use("/api/cart", cartRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/review", reviewRoutes); // <-- review mounted here
 app.use("/api/payments", paymentsRouter);
+
 
 
 // global error handler (optional)

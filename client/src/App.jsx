@@ -31,10 +31,17 @@ import PrivateRoutes from "./components/routes/Private.jsx";
 import AdminRoutes from "./components/routes/Admin.jsx";
 import Footer from "./components/Footer.jsx";
 
+// src/App.jsx (top)
+import Chatbot from "./components/Chatbot";
+
+
+
 function App() {
   return (
     <>
+  
       <NavBar />
+      <Chatbot />
       <Routes>
         {/* Public Routes */}
         <Route path="/" element={<HomePage />} />

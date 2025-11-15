@@ -6,6 +6,7 @@ const Sticker = forwardRef(({ order }, ref) => {
 
   const orderId = order._id.slice(-6).toUpperCase();
   const qrValue = `https://hotcolours.com/track/${order._id}`;
+    // const qrValue = `${process.env.REACT_APP_BASE_URL}/track/${order._id}`;
 
   return (
     <div

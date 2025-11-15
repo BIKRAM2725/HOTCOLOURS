@@ -1,54 +1,58 @@
+// src/page/Register.jsx
 import React, { useState } from "react";
 import { ToastContainer, toast } from "react-toastify";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import axios from "axios";
+
+const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
 function Register() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false); // ✅ new
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+
+  const validateEmail = (email) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
 
-  
-    if (!name || !email || !password) {
-      // setError("All fields are required");
+    if (!name.trim() || !email.trim() || !password) {
       toast.error("All fields are required");
       return;
     }
-    if (password.length < 6 || password.length > 12) {
-      // setError("Password must be 6–12 characters long");
-      toast.error("Password must be 6–12 characters long");
+
+    if (!validateEmail(email.trim())) {
+      toast.error("Enter a valid email address");
       return;
     }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      // setError("Enter a valid email address");
-      toast.error("Enter a valid email address")
+
+    if (password.length < 6 || password.length > 12) {
+      toast.error("Password must be 6–12 characters long");
       return;
     }
 
     try {
       setLoading(true);
-
-      const res = await axios.post("http://localhost:5000/api/auth/register", {
-        name,
-        email,
+      const res = await axios.post(`${API_BASE}/api/auth/register`, {
+        name: name.trim(),
+        email: email.trim(),
         password,
       });
 
-      toast.success(res.data.message || "Registered Successfully");
-      navigate("/login");
-
+      toast.success(res.data.message || "Registered successfully");
+      setTimeout(() => {
+        navigate("/login");
+      }, 800);
     } catch (err) {
       const errorMsg =
-        err.response?.data?.message || "Network error, please try again";
-      // setError(errorMsg);
+        err?.response?.data?.message || "Network error, please try again";
       toast.error(errorMsg);
     } finally {
       setLoading(false);
@@ -56,88 +60,112 @@ function Register() {
   };
 
   return (
-    <>
-      <div className="flex items-center justify-center p-[100px] bg-gray-100">
-        <div className="h-auto w-[380px] rounded-lg shadow-lg">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 py-12">
+      <div className="w-full max-w-md">
+        <div className="bg-white rounded-lg shadow-lg overflow-hidden">
           {/* Header */}
-          <div className="w-full h-[50px] border border-blue-500 font-semibold text-white bg-blue-500 flex items-center justify-center rounded-t-xl text-2xl pt-[8px]">
-            Register
+          <div className="bg-blue-600 text-white py-4 px-6">
+            <h2 className="text-2xl font-semibold text-center">Register</h2>
           </div>
 
           {/* Form */}
-          <form onSubmit={handleSubmit}>
-            <div className="flex items-center justify-center pt-5">
-              <div className="mb-4 w-[300px]">
-                {/* Name */}
-                <h2 className="font-semibold text-slate-700 pb-2">Name</h2>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="bg-slate-200 w-full h-[35px] border border-slate-300 
-                             hover:border-slate-400 rounded-md shadow-md px-2"
-                />
-
-                {/* Email */}
-                <h2 className="font-semibold text-slate-700 pb-2 pt-2">Email</h2>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="bg-slate-200 w-full h-[35px] border border-slate-300 
-                             hover:border-slate-400 rounded-md shadow-md px-2"
-                />
-
-                {/* Password */}
-                <h2 className="font-semibold text-slate-700 pb-2 pt-2">Password</h2>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="bg-slate-200 w-full h-[35px] border border-slate-300 
-                             hover:border-slate-400 rounded-md shadow-md px-2"
-                />
-
-                {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
-              </div>
+          <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <div>
+              <label htmlFor="name" className="block text-sm font-medium text-gray-700">
+                Name
+              </label>
+              <input
+                id="name"
+                name="name"
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="mt-2 block w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-400"
+                placeholder="Your full name"
+                autoComplete="name"
+              />
             </div>
 
-            {/* Button */}
-            <div className="flex items-center justify-center pt-5 pb-5">
+            <div>
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+                Email
+              </label>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="mt-2 block w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-400"
+                placeholder="you@example.com"
+                autoComplete="email"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+                Password
+              </label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="mt-2 block w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-400"
+                placeholder="6-12 characters"
+                autoComplete="new-password"
+              />
+            </div>
+
+            {error && <p className="text-red-500 text-sm">{error}</p>}
+
+            <div>
               <button
                 type="submit"
-                disabled={loading} // ✅ disable while loading
-                className={`border border-blue-500 w-[250px] h-[35px] rounded-xl 
-                           transition-all duration-300 transform shadow-md 
-                           ${
-                             loading
-                               ? "bg-gray-400 cursor-not-allowed"
-                               : "bg-blue-500 hover:bg-blue-600 hover:scale-90 shadow-blue-500"
-                           }`}
+                disabled={loading}
+                className={`w-full flex items-center justify-center gap-2 px-4 py-2 rounded-md text-white font-semibold transition ${
+                  loading ? "bg-blue-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"
+                }`}
               >
-                <h2 className="text-white font-semibold text-[15px]">
-                  {loading ? "Registering..." : "Register"}
-                </h2>
+                {loading ? (
+                  <>
+                    <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24">
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                        fill="none"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                      />
+                    </svg>
+                    Registering...
+                  </>
+                ) : (
+                  "Register"
+                )}
               </button>
             </div>
 
-            {/* Footer */}
-            <div className="flex items-center justify-center pb-8">
-              <h2 className="text-slate-700 text-[13px]">
-                Already a user?{" "}
-                <a
-                  className="font-semibold text-slate-700 hover:text-indigo-600"
-                  href="/login"
-                >
-                  Login
-                </a>
-              </h2>
+            <div className="text-center text-sm text-gray-600">
+              Already a user?{" "}
+              <Link to="/login" className="font-medium text-blue-600 hover:underline">
+                Login
+              </Link>
             </div>
           </form>
         </div>
+
+        <ToastContainer position="top-right" />
       </div>
-      <ToastContainer position="top-right" />
-    </>
+    </div>
   );
 }
 

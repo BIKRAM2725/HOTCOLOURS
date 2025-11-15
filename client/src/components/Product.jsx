@@ -3,17 +3,16 @@ import axios from "axios";
 import { Link } from "react-router-dom";
 import Spinner from "./Spinner";
 
-
 const Product = () => {
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  const API_URL = process.env.REACT_APP_API_URL;
+
   useEffect(() => {
     const fetchCategories = async () => {
       try {
-        const res = await axios.get(
-          "http://localhost:5000/api/category/get-category"
-        );
+        const res = await axios.get(`${API_URL}/api/category/get-category`);
         if (res.data.success) {
           setCategories(res.data.categories);
         }
@@ -25,53 +24,52 @@ const Product = () => {
     };
 
     fetchCategories();
-  }, []);
+  }, [API_URL]);
 
   return (
     <>
-      <div className="flex flex-col mt-12 max-w-[1200px] mx-auto">
-        <h1 className="font-bold text-[30px] text-slate-800">
-          CATEGORIES
-        </h1>
-        <p className="text-gray-600 mb-10 max-w-xl">
-          Pure Taste. Pure Tradition.
-        </p>
-      </div>
+      <div className="mt-12 max-w-[1200px] mx-auto px-4 sm:px-6">
+        <h1 className="font-bold text-3xl text-slate-800">CATEGORIES</h1>
+        <p className="text-gray-600 mb-6 max-w-xl">Pure Taste. Pure Tradition.</p>
 
-      {/* Category Grid */}
-      <div className="flex gap-4 justify-center flex-wrap">
-        {loading
-          ? // Show 4 placeholder boxes with spinners while loading
-            Array.from({ length: 4 }).map((_, index) => (
-              <div
-                key={index}
-                className="relative rounded-xl overflow-hidden shadow-md bg-gray-100 h-48 w-[18rem] flex justify-center items-center"
-              >
-                <Spinner />
-              </div>
-            ))
-          : categories.length === 0
-          ? // No category found
-            (
-              <div className="flex justify-center items-center py-10 text-gray-500 w-full">
-                No categories found
-              </div>
-            )
-          : // Categories loaded
-            categories.map((cat) => (
-                            <Link key={cat._id} to={`/category/${cat._id}`}>
-                <div className="relative rounded-xl overflow-hidden hover:shadow-lg hover:scale-95 transition duration-300 cursor-pointer flex flex-col justify-center items-center bg-white">
-                  <img
-                    className="rounded-lg object-cover h-48 w-[18rem] transition-transform duration-300 hover:scale-105"
-                    src={cat.image}
-                    alt={cat.name}
-                  />
-                  <h2 className="text-lg font-semibold mt-2 mb-2 text-gray-800">
-                    {cat.name}
-                  </h2>
+        {/* GRID RESPONSIVE — Mobile 2, Tablet 3, Laptop 4 */}
+        <div
+          className="grid gap-6
+                     grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4
+                     items-stretch"
+        >
+          {loading
+            ? Array.from({ length: 4 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="rounded-xl overflow-hidden shadow-sm bg-gray-100 flex flex-col"
+                >
+                  <div className="h-40 flex items-center justify-center">
+                    <Spinner />
+                  </div>
                 </div>
-              </Link>
-            ))}
+              ))
+            : categories.length === 0
+            ? (
+                <div className="col-span-full text-center text-gray-500 py-10">
+                  No categories found
+                </div>
+              )
+            : categories.map((cat) => (
+                <Link key={cat._id} to={`/category/${cat._id}`}>
+                  <div className="rounded-xl overflow-hidden bg-white shadow-sm hover:shadow-lg transition transform hover:-translate-y-1 duration-200">
+                    <img
+                      src={cat.image}
+                      alt={cat.name}
+                      className="w-full h-40 object-cover"
+                    />
+                    <h2 className="text-center text-lg font-semibold p-3 text-gray-800">
+                      {cat.name}
+                    </h2>
+                  </div>
+                </Link>
+              ))}
+        </div>
       </div>
     </>
   );

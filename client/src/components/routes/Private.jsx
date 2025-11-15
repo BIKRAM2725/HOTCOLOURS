@@ -1,49 +1,4 @@
-
-// import React, { useEffect, useState } from "react";
-// import axios from "axios";
-// import { Outlet, useNavigate } from "react-router-dom";
-// import { useAuth } from "../../context/UserContext";
-// import Spinner from "../Spinner";
-
-// export default function PrivateRoutes() {
-//   const [ok, setOk] = useState(false);
-//   const [auth] = useAuth();
-//   const navigate = useNavigate();
-//   const [loading, setLoading] = useState(true); // wait until auth loaded
-
-//   useEffect(() => {
-//     const authCheck = async () => {
-//       try {
-//         if (!auth?.token) {
-//           navigate("/login");
-//           return;
-//         }
-
-//         const response = await axios.get(
-//           `${import.meta.env.VITE_API_URL}/api/auth/user-auth`,
-//           {
-//             headers: { Authorization: `Bearer ${auth.token}` },
-//           }
-//         );
-
-//         if (response.data.ok) setOk(true);
-//         else navigate("/login");
-//       } catch (error) {
-//         console.error("Auth check failed:", error);
-//         navigate("/login");
-//       } finally {
-//         setLoading(false);
-//       }
-//     };
-
-//     authCheck();
-//   }, [auth, navigate]);
-
-//   if (loading) return <Spinner message="Checking authentication..." />;
-
-//   return ok ? <Outlet /> : null;
-// }
-
+// src/components/routes/Private.jsx
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { Outlet, useNavigate } from "react-router-dom";
@@ -57,41 +12,55 @@ export default function PrivateRoutes() {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    const authCheck = async () => {
+    let mounted = true;
+
+    const checkUser = async () => {
       try {
-        // Use context auth, or fallback to localStorage
-        const token = auth?.token || JSON.parse(localStorage.getItem("auth"))?.token;
+        // prefer context auth; fallback to localStorage
+        const stored = typeof window !== "undefined" ? JSON.parse(localStorage.getItem("auth")) : null;
+        const authData = auth || stored || {};
+        const token = authData?.token;
+        const user = authData?.user;
 
         if (!token) {
-          navigate("/login"); // redirect if no token
+          // no token -> login
+          if (mounted) navigate("/login");
           return;
         }
 
-        // Replace env variable with direct backend URL
-        const response = await axios.get(
-          `http://localhost:5000/api/auth/user-auth`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
+        // verify token with backend (user-auth endpoint)
+        const res = await axios.get("http://localhost:5000/api/auth/user-auth", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
 
-        if (response.data.ok) {
-          setOk(true); // token valid → show dashboard
+        // backend returned ok -> token valid
+        if (res?.data?.ok) {
+          // if the user (from context/localStorage) is admin, redirect to admin dashboard
+          if (user?.role === "admin") {
+            if (mounted) navigate("/admin/details");
+            return;
+          }
+          // non-admin user with valid token -> allow access
+          if (mounted) setOk(true);
         } else {
-          navigate("/login"); // invalid token → redirect
+          if (mounted) navigate("/login");
         }
-      } catch (error) {
-        console.error("Auth check failed:", error);
-        navigate("/login"); // error → redirect
+      } catch (err) {
+        console.error("User check failed", err);
+        if (mounted) navigate("/login");
       } finally {
-        setChecking(false);
+        if (mounted) setChecking(false);
       }
     };
 
-    authCheck();
+    checkUser();
+
+    return () => {
+      mounted = false;
+    };
   }, [auth, navigate]);
 
-  if (checking) return <Spinner />;
+  if (checking) return <Spinner message="Checking user access..." />;
 
   return ok ? <Outlet /> : null;
 }

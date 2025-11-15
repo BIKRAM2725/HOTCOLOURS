@@ -18,6 +18,9 @@ export default function Track() {
   const [sendCooldown, setSendCooldown] = useState(0);
   const cooldownRef = useRef(null);
 
+  // new: email input for sending OTP (prefilled from order when available)
+  const [emailToSend, setEmailToSend] = useState("");
+
   useEffect(() => {
     console.log("TRACK PAGE - API base:", API);
     fetchOrder();
@@ -33,6 +36,9 @@ export default function Track() {
       const res = await axios.get(`${API}/api/orders/public/${id}`);
       if (res.data?.success) {
         setOrder(res.data.order);
+        // prefill emailToSend if available in order (use user.email or address.email)
+        const email = res.data.order?.user?.email || res.data.order?.address?.email || "";
+        setEmailToSend(email);
       } else {
         toast.error(res.data?.message || "Order not found");
         setOrder(null);
@@ -66,18 +72,17 @@ export default function Track() {
     if (!id) return;
     setSendingOtp(true);
     try {
-      const res = await axios.post(`${API}/api/orders/public/${id}/send-otp`);
+      // send optional email in body so server can validate and send OTP specifically to that email
+      const body = {};
+      if (emailToSend && emailToSend.trim().length > 0) body.email = emailToSend.trim();
+
+      const res = await axios.post(`${API}/api/orders/public/${id}/send-otp`, body);
       if (res.data?.success) {
         toast.success("OTP sent to customer (email / SMS) if available");
         setOtpSent(true);
         startCooldown(60);
-        // update order if server returned order object (safe copy without otp)
-        if (res.data.order) {
-          setOrder(res.data.order);
-        } else {
-          // fallback: fetch after a short delay
-          setTimeout(fetchOrder, 1200);
-        }
+        if (res.data.order) setOrder(res.data.order);
+        else setTimeout(fetchOrder, 1200);
       } else {
         toast.error(res.data?.message || "Failed to send OTP");
       }
@@ -101,10 +106,8 @@ export default function Track() {
       const res = await axios.put(`${API}/api/orders/public/${id}/deliver`, { otp: otp.trim() });
       if (res.data?.success) {
         toast.success("Order marked as delivered");
-        // update local order and clear OTP
         setOtp("");
         setOtpSent(false);
-        // re-fetch order state
         await fetchOrder();
       } else {
         toast.error(res.data?.message || "Failed to mark delivered");
@@ -146,6 +149,17 @@ export default function Track() {
     };
   });
 
+  // optional: mask email for display (e.g. a@***.com)
+  const maskedEmail = (e) => {
+    if (!e) return "";
+    const [local, domain] = String(e).split("@");
+    if (!local || !domain) return e;
+    const maskedLocal = local.length <= 2 ? local[0] + "*" : local[0] + "*".repeat(Math.max(1, local.length - 2)) + local.slice(-1);
+    const domainParts = domain.split(".");
+    const maskedDomain = domainParts.length > 1 ? domainParts[0][0] + "*".repeat(Math.max(1, domainParts[0].length - 2)) + "." + domainParts.slice(1).join(".") : domain;
+    return `${maskedLocal}@${maskedDomain}`;
+  };
+
   return (
     <div className="max-w-3xl mx-auto mt-8 p-6 bg-white shadow rounded">
       <ToastContainer position="top-right" autoClose={3000} />
@@ -182,17 +196,25 @@ export default function Track() {
 
       <div className="space-y-4">
         {/* Send OTP */}
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleSendOtp}
-            disabled={sendingOtp || sendCooldown > 0 || order.status === "Delivered"}
-            className={`px-4 py-2 rounded text-white ${sendCooldown > 0 || sendingOtp || order.status === "Delivered" ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}
-          >
-            {sendingOtp ? "Sending..." : sendCooldown > 0 ? `Send OTP (${sendCooldown}s)` : "Send OTP"}
-          </button>
-          <div className="text-sm text-gray-600">
-            Press to send OTP to customer (email/SMS). They will receive a 6-digit code.
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Send OTP to customer email (optional)</label>
+          <div className="flex items-center gap-3">
+            <input
+              value={emailToSend}
+              onChange={(e) => setEmailToSend(e.target.value)}
+              placeholder={order.user?.email || order.address?.email ? maskedEmail(order.user?.email || order.address?.email) : "customer@example.com"}
+              className="flex-1 border rounded px-3 py-2"
+              disabled={order.status === "Delivered"}
+            />
+            <button
+              onClick={handleSendOtp}
+              disabled={sendingOtp || sendCooldown > 0 || order.status === "Delivered"}
+              className={`px-4 py-2 rounded text-white ${sendCooldown > 0 || sendingOtp || order.status === "Delivered" ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}
+            >
+              {sendingOtp ? "Sending..." : sendCooldown > 0 ? `Send OTP (${sendCooldown}s)` : "Send OTP"}
+            </button>
           </div>
+          <div className="text-sm text-gray-600">Leave email blank to use the customer's saved email/phone on record.</div>
         </div>
 
         {/* OTP input + confirm */}

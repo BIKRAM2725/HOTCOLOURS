@@ -1,76 +1,59 @@
-import React, { useState } from "react";
-import bannerImg from "../assets/rectangle-2.png";
-import { useNavigate } from "react-router-dom";
+// src/components/Banner.jsx
+import React, { useEffect, useState } from "react";
+
+import Banner1 from "../assets/banner1.jpg";
+import Banner2 from "../assets/banner2.jpg";
+import Banner3 from "../assets/banner3.jpg";
 
 function Banner() {
-  const [query, setQuery] = useState("");
-  const navigate = useNavigate();
+  const [index, setIndex] = useState(0);
+  const images = [Banner1, Banner2, Banner3];
 
-  const handleSearch = () => {
-    if (query.trim()) {
-      navigate(`/search?query=${encodeURIComponent(query.trim())}`);
-    }
-  };
-
-  const handleKeyPress = (e) => {
-    if (e.key === "Enter") handleSearch();
-  };
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setIndex((prev) => (prev + 1) % images.length);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [images.length]);
 
   return (
     <div
-      className="w-full bg-cover bg-center relative
-                 h-[300px] sm:h-[380px] md:h-[500px]"
-      style={{ backgroundImage: `url(${bannerImg})` }}
+      className="
+        w-full
+        h-[180px]      
+        sm:h-[260px]   
+        md:h-[350px]  
+        lg:h-[500px]  
+        xl:h-[550px]  
+        relative 
+        overflow-hidden
+      "
     >
-      <div className="absolute inset-0 bg-black opacity-40"></div>
+      {/* Image container */}
+      {images.map((img, i) => (
+        <img
+          key={i}
+          src={img}
+          alt={`banner-${i}`}
+          className={`
+            absolute inset-0 w-full h-full object-cover object-center
+            transition-opacity duration-1000
+            ${i === index ? "opacity-100" : "opacity-0"}
+          `}
+        />
+      ))}
 
-      <div className="relative z-10 flex flex-col items-center justify-center text-white h-full px-4">
-        <h1 className="text-2xl sm:text-3xl md:text-5xl font-bold mb-3 text-center">
-          Enjoy Your Food, Enjoy the Spices.
-        </h1>
-        <p className="text-sm sm:text-base md:text-xl text-center max-w-2xl">
-          Add Magic to Meals.
-        </p>
-
-        {/* ================================
-              SEARCH BOX (Responsive)
-           ================================= */}
-        <div
-          className="mt-5 bg-white rounded-lg shadow-md border border-slate-600
-                     w-[90%] max-w-[880px]
-                     flex flex-col sm:flex-row items-center 
-                     px-3 py-3 gap-3"
-        >
-          <input
-            type="text"
-            placeholder="Search Destination..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={handleKeyPress}
-            className="border border-slate-300 h-[45px]
-                       w-full sm:flex-1
-                       text-black p-2 rounded-md focus:outline-none"
-          />
-
+      {/* Dots */}
+      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2 z-10">
+        {images.map((_, i) => (
           <button
-            onClick={handleSearch}
-            className="h-[45px] w-full sm:w-[110px]
-                       bg-blue-600 text-white rounded-md font-semibold
-                       hover:bg-blue-700 transition"
-          >
-            Search
-          </button>
-        </div>
-
-        {/* ================================
-               MOBILE ONLY SECTION
-               (Add mobile-only elements here if needed)
-               Visible below 640px (sm breakpoint)
-           ================================= */}
-        <div className="sm:hidden text-white text-xs mt-2 opacity-80">
-          {/* Mobile-only area (currently empty on purpose) */}
-          {/* You can add mobile shortcuts, hints, or small text here */}
-        </div>
+            key={i}
+            onClick={() => setIndex(i)}
+            className={`h-2.5 w-2.5 rounded-full transition 
+              ${i === index ? "bg-white" : "bg-gray-500"}
+            `}
+          />
+        ))}
       </div>
     </div>
   );
