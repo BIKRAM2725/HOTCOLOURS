@@ -7,12 +7,15 @@ export default function PostSlider() {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const visibleCount = 4; // Number of visible slides at a time
+  const visibleCount = 4;
   const navigate = useNavigate();
+
+  // IMPORTANT: Use .env API URL
+  const API_URL = process.env.REACT_APP_API_URL;
 
   const fetchPosts = async () => {
     try {
-      const res = await fetch("http://localhost:5000/api/post/get-all-posts");
+      const res = await fetch(`${API_URL}/api/post/get-all-posts`);
       const data = await res.json();
       if (data.success) setPosts(data.posts);
     } catch (error) {
@@ -34,7 +37,9 @@ export default function PostSlider() {
 
   const previous = () => {
     setCurrentIndex((prevIndex) =>
-      posts.length > 0 ? (prevIndex - 1 + posts.length) % posts.length : prevIndex
+      posts.length > 0
+        ? (prevIndex - 1 + posts.length) % posts.length
+        : prevIndex
     );
   };
 
@@ -97,7 +102,9 @@ export default function PostSlider() {
                     <h3 className="font-semibold text-gray-800 h-12 overflow-hidden text-ellipsis">
                       {post.title}
                     </h3>
-                    <p className="text-indigo-600 font-medium mt-1">₹ {post.price}</p>
+                    <p className="text-indigo-600 font-medium mt-1">
+                      ₹ {post.price}
+                    </p>
                   </div>
                 </div>
               </div>
