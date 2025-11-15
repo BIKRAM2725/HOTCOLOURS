@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body {
+  @apply overflow-x-hidden;
+  margin: 0;
+  padding: 0;
+}
+
+.black-screen{
+  background-color: rgba(0, 0, 0, 0.7);
+}
