@@ -1,3 +1,4 @@
+// src/page/Login.jsx
 import React, { useState } from "react";
 import axios from "axios";
 import { ToastContainer, toast } from "react-toastify";
@@ -11,6 +12,9 @@ function Login() {
   const [message, setMessage] = useState("");
   const [auth, setAuth] = useAuth();
   const navigate = useNavigate();
+
+  // ✅ BASE URL FROM .env
+  const API = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -27,7 +31,7 @@ function Login() {
     }
 
     try {
-      const response = await axios.post("http://localhost:5000/api/auth/login", {
+      const response = await axios.post(`${API}/api/auth/login`, {
         email,
         password,
       });
@@ -51,7 +55,8 @@ function Login() {
       }, 700);
     } catch (err) {
       toast.error(
-        err.response?.data?.message || "Login Failed, check email or password"
+        err.response?.data?.message ||
+          "Login Failed, check email or password"
       );
     }
   };
@@ -62,16 +67,13 @@ function Login() {
         <div className="mx-auto">
           <div className="w-full max-w-md md:w-[380px] mx-auto rounded-lg shadow-lg overflow-hidden">
 
-            {/* Header */}
             <div className="w-full h-[50px] border border-blue-500 font-semibold text-white bg-blue-500 flex items-center justify-center rounded-t-xl text-2xl">
               Login In
             </div>
 
-            {/* ---- Added Instruction Line ---- */}
             <div className="text-center text-[14px] text-red-600 font-semibold mt-3">
               Admin: admin2025@gmail.com | Password: 123456
             </div>
-            {/* -------------------------------- */}
 
             <form onSubmit={handleSubmit} className="bg-white p-6">
               <div className="flex items-center justify-center pt-2">
@@ -105,7 +107,10 @@ function Login() {
                 </label>
 
                 <div className="ml-auto">
-                  <Link to="/forgot-password" className="text-blue-600 text-[13px] hover:underline">
+                  <Link
+                    to="/forgot-password"
+                    className="text-blue-600 text-[13px] hover:underline"
+                  >
                     Forget password
                   </Link>
                 </div>
@@ -132,8 +137,12 @@ function Login() {
                 </h2>
               </div>
 
-              {error && <p className="text-red-500 text-center mt-2">{error}</p>}
-              {message && <p className="text-green-500 text-center mt-2">{message}</p>}
+              {error && (
+                <p className="text-red-500 text-center mt-2">{error}</p>
+              )}
+              {message && (
+                <p className="text-green-500 text-center mt-2">{message}</p>
+              )}
             </form>
 
             <ToastContainer position="top-right" />
