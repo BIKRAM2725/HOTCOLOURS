@@ -1,9 +1,11 @@
-// CreatePost.jsx
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { toast } from "react-toastify";
 import AdminNavbar from "../admin/AdminNavbar";
 import { IoClose } from "react-icons/io5";
+
+// Use env-based API base URL
+const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
 export default function CreatePost() {
   const [categories, setCategories] = useState([]);
@@ -24,19 +26,23 @@ export default function CreatePost() {
   });
 
   const [images, setImages] = useState([]); // File objects
-  const [imagePreviews, setImagePreviews] = useState([]); // data URLs for preview
+  const [imagePreviews, setImagePreviews] = useState([]); // data URLs or remote URLs
 
   useEffect(() => {
     fetchCategories();
     fetchPosts();
   }, []);
 
+  // Generate previews whenever images change
   useEffect(() => {
-    // generate previews whenever images change
     if (!images || images.length === 0) {
-      setImagePreviews([]);
+      setImagePreviews((prev) =>
+        // keep remote previews when editing (strings) if no new files added
+        prev.filter((src) => typeof src === "string" && src.startsWith("http"))
+      );
       return;
     }
+
     const readers = images.map((file) => {
       return new Promise((res) => {
         const reader = new FileReader();
@@ -45,12 +51,20 @@ export default function CreatePost() {
       });
     });
 
-    Promise.all(readers).then((results) => setImagePreviews(results));
+    Promise.all(readers).then((results) => {
+      // If editing & had remote URLs, keep them + add new ones
+      setImagePreviews((prev) => {
+        const existingRemote = prev.filter(
+          (src) => typeof src === "string" && src.startsWith("http")
+        );
+        return [...existingRemote, ...results];
+      });
+    });
   }, [images]);
 
   const fetchCategories = async () => {
     try {
-      const res = await axios.get("http://localhost:5000/api/category/get-category");
+      const res = await axios.get(`${API_BASE}/api/category/get-category`);
       if (res.data?.success) setCategories(res.data.categories || []);
     } catch (error) {
       console.error("fetchCategories:", error?.response?.data || error.message);
@@ -60,7 +74,7 @@ export default function CreatePost() {
 
   const fetchPosts = async () => {
     try {
-      const res = await axios.get("http://localhost:5000/api/post/get-all-posts");
+      const res = await axios.get(`${API_BASE}/api/post/get-all-posts`);
       if (res.data?.success) setPosts(res.data.posts || []);
     } catch (error) {
       console.error("fetchPosts:", error?.response?.data || error.message);
@@ -79,13 +93,20 @@ export default function CreatePost() {
 
   const handleImages = (e) => {
     const files = Array.from(e.target.files || []);
-    // Optionally limit number of images, size, types here
     setImages((prev) => [...prev, ...files]);
   };
 
   const removeImageAt = (index) => {
-    setImages((prev) => prev.filter((_, i) => i !== index));
     setImagePreviews((prev) => prev.filter((_, i) => i !== index));
+
+    // If we are removing a local file preview, also update images list.
+    // (Assumes local previews are at the end or matches count)
+    setImages((prev) => {
+      if (!prev.length) return prev;
+      // simple approach: just slice from end if counts don't match; good enough for now
+      if (index >= prev.length) return prev;
+      return prev.filter((_, i) => i !== index);
+    });
   };
 
   const resetForm = () => {
@@ -120,24 +141,25 @@ export default function CreatePost() {
       formData.append("title", title);
       formData.append("description", description);
       formData.append("category", category);
-      // convert numeric fields to numbers if needed by backend
       formData.append("guest", String(guest));
       formData.append("price", String(price));
       formData.append("isAvailable", isAvailable ? "true" : "false");
 
-      // facilities -> send as array (backend expects JSON array)
       const facArr =
         typeof facilities === "string" && facilities.trim().length > 0
-          ? facilities.split(",").map((s) => s.trim()).filter(Boolean)
+          ? facilities
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean)
           : [];
       formData.append("facilities", JSON.stringify(facArr));
 
-      // images
+      // Attach ONLY new files (backend should keep old URLs if nothing removed)
       images.forEach((file) => formData.append("images", file));
 
       const url = editingPost
-        ? `http://localhost:5000/api/post/update-post/${editingPost._id}`
-        : "http://localhost:5000/api/post/create-post";
+        ? `${API_BASE}/api/post/update-post/${editingPost._id}`
+        : `${API_BASE}/api/post/create-post`;
 
       const method = editingPost ? "put" : "post";
 
@@ -154,7 +176,10 @@ export default function CreatePost() {
       }
     } catch (error) {
       console.error("handleSubmit error:", error?.response?.data || error.message);
-      toast.error(error?.response?.data?.message || "Something went wrong while saving the post");
+      toast.error(
+        error?.response?.data?.message ||
+          "Something went wrong while saving the post"
+      );
     } finally {
       setLoading(false);
     }
@@ -169,17 +194,19 @@ export default function CreatePost() {
       category: post.category?._id || post.category || "",
       guest: post.guest || "",
       price: post.price || "",
-      facilities: Array.isArray(post.facilities) ? post.facilities.join(",") : post.facilities || "",
+      facilities: Array.isArray(post.facilities)
+        ? post.facilities.join(",")
+        : post.facilities || "",
       isAvailable: post.isAvailable ?? true,
     });
 
-    // If the post already has remote images and you want to show them in previews,
-    // you can set imagePreviews to the remote URLs. But we won't populate `images` (files).
+    // show existing remote URLs as previews
     if (post.images && post.images.length > 0) {
       setImagePreviews(post.images);
     } else {
       setImagePreviews([]);
     }
+    setImages([]); // new upload will be fresh
 
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -187,7 +214,7 @@ export default function CreatePost() {
   const handleDelete = async (id) => {
     if (!window.confirm("Are you sure you want to delete this post?")) return;
     try {
-      const res = await axios.delete(`http://localhost:5000/api/post/delete-post/${id}`);
+      const res = await axios.delete(`${API_BASE}/api/post/delete-post/${id}`);
       if (res.data?.success) {
         toast.success("Post deleted successfully");
         fetchPosts();
@@ -231,7 +258,10 @@ export default function CreatePost() {
               aria-hidden="true"
             />
             <div className="absolute left-4 right-4 top-16 p-4">
-              <AdminNavbar variant="inline" onClose={() => setMobileMenuOpen(false)} />
+              <AdminNavbar
+                variant="inline"
+                onClose={() => setMobileMenuOpen(false)}
+              />
             </div>
           </div>
         )}
@@ -333,7 +363,9 @@ export default function CreatePost() {
               />
 
               <div>
-                <label className="block mb-2 text-sm font-medium text-gray-700">Images</label>
+                <label className="block mb-2 text-sm font-medium text-gray-700">
+                  Images
+                </label>
                 <input
                   type="file"
                   multiple
@@ -389,7 +421,13 @@ export default function CreatePost() {
                   className="px-6 py-3 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition font-semibold disabled:opacity-60"
                   disabled={loading}
                 >
-                  {loading ? (editingPost ? "Updating..." : "Creating...") : editingPost ? "Update Post" : "Create Post"}
+                  {loading
+                    ? editingPost
+                      ? "Updating..."
+                      : "Creating..."
+                    : editingPost
+                    ? "Update Post"
+                    : "Create Post"}
                 </button>
               </div>
             </form>
@@ -398,7 +436,9 @@ export default function CreatePost() {
 
         {/* View All Posts */}
         <section className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-          <h3 className="text-2xl font-bold text-indigo-700 mb-6 text-center">All Products</h3>
+          <h3 className="text-2xl font-bold text-indigo-700 mb-6 text-center">
+            All Products
+          </h3>
 
           {posts.length === 0 ? (
             <p className="text-center text-gray-500">No product found</p>
@@ -410,13 +450,19 @@ export default function CreatePost() {
                   className="border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition duration-300 p-4 bg-gray-50"
                 >
                   <img
-                    src={post.images?.[0] || imagePreviews[0] || "/placeholder.jpg"}
+                    src={post.images?.[0] || "/placeholder.jpg"}
                     alt={post.title}
                     className="w-full h-40 object-cover rounded-lg mb-3"
                   />
-                  <h4 className="font-bold text-lg text-gray-800">{post.title}</h4>
-                  <p className="text-sm text-gray-500 mt-2 line-clamp-2">{post.description}</p>
-                  <p className="text-sm text-indigo-600 font-medium mt-2">₹ {post.price}</p>
+                  <h4 className="font-bold text-lg text-gray-800">
+                    {post.title}
+                  </h4>
+                  <p className="text-sm text-gray-500 mt-2 line-clamp-2">
+                    {post.description}
+                  </p>
+                  <p className="text-sm text-indigo-600 font-medium mt-2">
+                    ₹ {post.price}
+                  </p>
 
                   <div className="flex justify-between mt-3">
                     <button
