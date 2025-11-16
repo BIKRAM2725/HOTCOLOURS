@@ -1,8 +1,18 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+// src/context/CartContext.jsx (or wherever this file lives)
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+} from "react";
 import axios from "axios";
 
 const CartContext = createContext();
 export const useCart = () => useContext(CartContext);
+
+// ✅ Use env var, fallback to localhost
+const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
 export const CartProvider = ({ children, userId }) => {
   const [cart, setCart] = useState({ items: [] });
@@ -12,7 +22,7 @@ export const CartProvider = ({ children, userId }) => {
   const fetchCart = useCallback(async () => {
     if (!userId) return;
     try {
-      const res = await axios.get(`http://localhost:5000/api/cart/${userId}`);
+      const res = await axios.get(`${API_BASE}/api/cart/${userId}`);
       if (res.data.success) {
         setCart(res.data.cart || { items: [] });
       }
@@ -29,7 +39,7 @@ export const CartProvider = ({ children, userId }) => {
     if (!userId) return;
     setLoading(true);
     try {
-      const res = await axios.post("http://localhost:5000/api/cart/add", {
+      const res = await axios.post(`${API_BASE}/api/cart/add`, {
         userId,
         productId: product._id,
         quantity,
@@ -45,7 +55,7 @@ export const CartProvider = ({ children, userId }) => {
   const updateQuantity = async (productId, quantity) => {
     if (!userId) return;
     try {
-      const res = await axios.put("http://localhost:5000/api/cart/update", {
+      const res = await axios.put(`${API_BASE}/api/cart/update`, {
         userId,
         productId,
         quantity,
@@ -59,7 +69,7 @@ export const CartProvider = ({ children, userId }) => {
   const removeFromCart = async (productId) => {
     if (!userId) return;
     try {
-      const res = await axios.delete("http://localhost:5000/api/cart/remove", {
+      const res = await axios.delete(`${API_BASE}/api/cart/remove`, {
         data: { userId, productId },
       });
       if (res.data.success) setCart(res.data.cart);
@@ -72,7 +82,9 @@ export const CartProvider = ({ children, userId }) => {
   const clearCart = async () => {
     if (!userId) return;
     try {
-      await axios.delete("http://localhost:5000/api/cart/clear", { data: { userId } });
+      await axios.delete(`${API_BASE}/api/cart/clear`, {
+        data: { userId },
+      });
       setCart({ items: [] });
     } catch (err) {
       console.error("Error clearing cart:", err);
