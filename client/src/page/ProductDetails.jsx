@@ -7,6 +7,9 @@ import Product from "../components/Product/Product";
 import RelatedPosts from "../components/Product/RelatedPost";
 import ReviewSection from "../components/Product/ReviewSection";
 
+// Use env, fallback to localhost for dev
+const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:5000";
+
 export default function ProductDetails() {
   const { slug } = useParams();
   const [product, setProduct] = useState(null);
@@ -17,9 +20,10 @@ export default function ProductDetails() {
       setLoading(true);
       try {
         const urls = [
-          `http://localhost:5000/api/product/get-product/${slug}`,
-          `http://localhost:5000/api/post/get-post/${slug}`,
+          `${API_BASE}/api/product/get-product/${slug}`,
+          `${API_BASE}/api/post/get-post/${slug}`,
         ];
+
         let res = null;
         for (const u of urls) {
           try {
@@ -29,8 +33,8 @@ export default function ProductDetails() {
             res = null;
           }
         }
+
         if (res?.data?.success) {
-          // unify shape: product could be in res.data.product or res.data.post
           const p = res.data.product ?? res.data.post;
           setProduct(p);
         } else {
@@ -43,6 +47,7 @@ export default function ProductDetails() {
         setLoading(false);
       }
     };
+
     fetchProduct();
   }, [slug]);
 
@@ -57,19 +62,19 @@ export default function ProductDetails() {
 
   return (
     <>
-      {/* Product (keeps the existing product layout) */}
+      {/* Product main section */}
       <div className="max-w-6xl mx-auto">
         <Product product={product} />
       </div>
 
-      {/* Reviews - full width background, content limited to max 1200px */}
+      {/* Reviews */}
       <div className="w-full bg-gray-50 py-10">
         <div className="max-w-[1200px] mx-auto px-4">
           <ReviewSection productId={product._id || product.id} />
         </div>
       </div>
 
-      {/* Related posts (kept inside 6xl like before) */}
+      {/* Related posts */}
       <div className="max-w-6xl mx-auto mt-16 px-4">
         <RelatedPosts category={product.category} excludeId={product._id} />
       </div>
