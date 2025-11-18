@@ -54,7 +54,8 @@ const CheckoutPage = () => {
   const [showAddressForm, setShowAddressForm] = useState(false);
 
   const navigate = useNavigate();
-  const RAZORPAY_KEY = process.env.REACT_APP_RAZORPAY_KEY || "rzp_test_v8PdcbBOr9XYV8"; // test key (public)
+  const RAZORPAY_KEY =
+    process.env.REACT_APP_RAZORPAY_KEY || "rzp_test_v8PdcbBOr9XYV8"; // test key (public)
   const API_URL = process.env.REACT_APP_API_URL;
 
   // Load user + token
@@ -63,8 +64,14 @@ const CheckoutPage = () => {
     if (storedAuth) {
       try {
         const parsedAuth = JSON.parse(storedAuth);
-        const uid = parsedAuth?.user?.id || parsedAuth?.user?._id || parsedAuth?.user?.uid;
-        const token = parsedAuth?.token || parsedAuth?.accessToken || parsedAuth?.authToken;
+        const uid =
+          parsedAuth?.user?.id ||
+          parsedAuth?.user?._id ||
+          parsedAuth?.user?.uid;
+        const token =
+          parsedAuth?.token ||
+          parsedAuth?.accessToken ||
+          parsedAuth?.authToken;
         setUserId(uid || null);
         setAuthToken(token || null);
       } catch (error) {
@@ -85,7 +92,11 @@ const CheckoutPage = () => {
 
   // Compute totals
   useEffect(() => {
-    const total = cart?.items?.reduce((acc, i) => acc + (i.product?.price || 0) * i.quantity, 0) || 0;
+    const total =
+      cart?.items?.reduce(
+        (acc, i) => acc + (i.product?.price || 0) * i.quantity,
+        0
+      ) || 0;
     let tempDiscount = promoCode === "WELCOMEHOTCOLOR" ? total * 0.25 : 0;
     const tempDelivery = total - tempDiscount >= 200 ? 0 : 100;
     setDiscount(Math.round(tempDiscount));
@@ -93,7 +104,8 @@ const CheckoutPage = () => {
     setFinalAmount(Math.round(total - tempDiscount + tempDelivery));
   }, [cart, promoCode]);
 
-  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+  const handleChange = (e) =>
+    setFormData({ ...formData, [e.target.name]: e.target.value });
 
   const handlePromoCode = () => {
     if (promoCode === "WELCOMEHOTCOLOR") {
@@ -149,7 +161,10 @@ const CheckoutPage = () => {
   // 2) Open Razorpay Checkout with returned order_id
   // 3) On success, POST to /api/payments/razorpay/verify with razorpay payment details + order payload
   //    The server should verify signature and then create the store order in DB (recommended).
-  const createRazorpayOrderOnServer = async (amountInPaise, metadata = {}) => {
+  const createRazorpayOrderOnServer = async (
+    amountInPaise,
+    metadata = {}
+  ) => {
     // server should return { success: true, razorpayOrder: { id, amount, currency, ... } }
     const headers = authToken ? { Authorization: `Bearer ${authToken}` } : {};
     const payload = {
@@ -158,13 +173,21 @@ const CheckoutPage = () => {
       receipt: `receipt_${Date.now()}`,
       metadata,
     };
-    const res = await axios.post(`${API_URL}/api/payments/razorpay/create-order`, payload, { headers });
+    const res = await axios.post(
+      `${API_URL}/api/payments/razorpay/create-order`,
+      payload,
+      { headers }
+    );
     return res.data;
   };
 
   const verifyRazorpayPaymentOnServer = async (verificationPayload) => {
     const headers = authToken ? { Authorization: `Bearer ${authToken}` } : {};
-    const res = await axios.post(`${API_URL}/api/payments/razorpay/verify`, verificationPayload, { headers });
+    const res = await axios.post(
+      `${API_URL}/api/payments/razorpay/verify`,
+      verificationPayload,
+      { headers }
+    );
     return res.data;
   };
 
@@ -216,9 +239,13 @@ const CheckoutPage = () => {
         }
 
         // create razorpay order on server
-        const createResp = await createRazorpayOrderOnServer(amountPaise, { meta: orderMeta });
+        const createResp = await createRazorpayOrderOnServer(amountPaise, {
+          meta: orderMeta,
+        });
         if (!createResp?.success || !createResp.razorpayOrder) {
-          toast.error(createResp?.message || "Failed to create payment order. Try again.");
+          toast.error(
+            createResp?.message || "Failed to create payment order. Try again."
+          );
           setLoading(false);
           return;
         }
@@ -252,7 +279,8 @@ const CheckoutPage = () => {
                 orderMeta,
               };
 
-              const verifyResp = await verifyRazorpayPaymentOnServer(verifyPayload);
+              const verifyResp =
+                await verifyRazorpayPaymentOnServer(verifyPayload);
 
               if (verifyResp?.success) {
                 toast.success("Payment successful and order placed");
@@ -264,10 +292,16 @@ const CheckoutPage = () => {
                   navigate("/user/orders");
                 }
               } else {
-                toast.error(verifyResp?.message || "Payment verification failed. Contact support.");
+                toast.error(
+                  verifyResp?.message ||
+                    "Payment verification failed. Contact support."
+                );
               }
             } catch (err) {
-              console.error("verify handler error:", err?.response?.data || err.message);
+              console.error(
+                "verify handler error:",
+                err?.response?.data || err.message
+              );
               toast.error("Payment verification failed. Contact support.");
             } finally {
               setLoading(false);
@@ -294,7 +328,11 @@ const CheckoutPage = () => {
           "Content-Type": "application/json",
         };
 
-        const res = await axios.post(`${API_URL}/api/orders/create`, payload, { headers });
+        const res = await axios.post(
+          `${API_URL}/api/orders/create`,
+          payload,
+          { headers }
+        );
         if (res?.data?.success) {
           toast.success("Order created successfully (COD)");
           clearCart();
@@ -313,11 +351,15 @@ const CheckoutPage = () => {
 
   return (
     <div className="max-w-3xl mx-auto mt-10 p-6 bg-white shadow-xl rounded-2xl border border-gray-200">
-      <h2 className="text-3xl font-bold mb-6 text-center text-gray-800">Checkout</h2>
+      <h2 className="text-3xl font-bold mb-6 text-center text-gray-800">
+        Checkout
+      </h2>
 
       {/* Delivery Type */}
       <div className="mb-6">
-        <label className="font-semibold text-gray-800 mb-2 block">Payment Method</label>
+        <label className="font-semibold text-gray-800 mb-2 block">
+          Payment Method
+        </label>
         <select
           name="paymentMethod"
           value={formData.paymentMethod}
@@ -329,11 +371,12 @@ const CheckoutPage = () => {
         </select>
       </div>
 
-      {/* (addresses, address form, promo, summary) — keep unchanged from your original code */}
       {/* Address Section */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-gray-800 text-lg">Delivery Address</h3>
+          <h3 className="font-semibold text-gray-800 text-lg">
+            Delivery Address
+          </h3>
           <div className="flex gap-2">
             <button
               type="button"
@@ -360,7 +403,9 @@ const CheckoutPage = () => {
               <label
                 key={idx}
                 className={`flex items-start gap-3 border p-3 rounded-lg cursor-pointer ${
-                  idx === selectedAddressIndex ? "border-blue-600 bg-blue-50" : "border-gray-300"
+                  idx === selectedAddressIndex
+                    ? "border-blue-600 bg-blue-50"
+                    : "border-gray-300"
                 }`}
               >
                 <input
@@ -371,13 +416,16 @@ const CheckoutPage = () => {
                   className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500"
                 />
                 <span className="text-gray-700">
-                  {addr.flatNo}, {addr.localAddress}, {addr.city}, {addr.state} - {addr.pincode}
+                  {addr.flatNo}, {addr.localAddress}, {addr.city},{" "}
+                  {addr.state} - {addr.pincode}
                 </span>
               </label>
             ))}
           </div>
         ) : (
-          <p className="text-gray-500 italic">No address saved yet. Add one to continue.</p>
+          <p className="text-gray-500 italic">
+            No address saved yet. Add one to continue.
+          </p>
         )}
       </div>
 
@@ -385,7 +433,9 @@ const CheckoutPage = () => {
       {showAddressForm && (
         <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
-            <h3 className="text-lg font-semibold mb-4 text-gray-800">Add / Edit Address</h3>
+            <h3 className="text-lg font-semibold mb-4 text-gray-800">
+              Add / Edit Address
+            </h3>
             <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-2">
               {[
                 "firstName",
@@ -440,7 +490,9 @@ const CheckoutPage = () => {
 
       {/* Promo Code */}
       <div className="mb-6">
-        <label className="font-semibold text-gray-800 mb-2 block">Promo Code</label>
+        <label className="font-semibold text-gray-800 mb-2 block">
+          Promo Code
+        </label>
         <div className="flex gap-2">
           <input
             type="text"
@@ -461,9 +513,14 @@ const CheckoutPage = () => {
 
       {/* Order Summary */}
       <div className="border rounded-xl p-5 bg-gray-50 shadow-inner">
-        <h3 className="text-lg font-semibold mb-3 text-gray-800">Order Summary</h3>
+        <h3 className="text-lg font-semibold mb-3 text-gray-800">
+          Order Summary
+        </h3>
         {cart?.items?.map((item) => (
-          <div key={item.product._id} className="flex justify-between text-gray-700 mb-1">
+          <div
+            key={item.product._id}
+            className="flex justify-between text-gray-700 mb-1"
+          >
             <span>
               {item.product.title} × {item.quantity}
             </span>
