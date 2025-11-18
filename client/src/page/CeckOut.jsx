@@ -55,6 +55,7 @@ const CheckoutPage = () => {
 
   const navigate = useNavigate();
   const RAZORPAY_KEY = process.env.REACT_APP_RAZORPAY_KEY || "rzp_test_v8PdcbBOr9XYV8"; // test key (public)
+  const API_URL = process.env.REACT_APP_API_URL;
 
   // Load user + token
   useEffect(() => {
@@ -157,13 +158,13 @@ const CheckoutPage = () => {
       receipt: `receipt_${Date.now()}`,
       metadata,
     };
-    const res = await axios.post("http://localhost:5000/api/payments/razorpay/create-order", payload, { headers });
+    const res = await axios.post(`${API_URL}/api/payments/razorpay/create-order`, payload, { headers });
     return res.data;
   };
 
   const verifyRazorpayPaymentOnServer = async (verificationPayload) => {
     const headers = authToken ? { Authorization: `Bearer ${authToken}` } : {};
-    const res = await axios.post("http://localhost:5000/api/payments/razorpay/verify", verificationPayload, { headers });
+    const res = await axios.post(`${API_URL}/api/payments/razorpay/verify`, verificationPayload, { headers });
     return res.data;
   };
 
@@ -234,7 +235,10 @@ const CheckoutPage = () => {
           order_id: rOrder.id,
           prefill: {
             name: `${orderMeta.address.firstName} ${orderMeta.address.lastName}`,
-            email: (JSON.parse(localStorage.getItem("auth") || "{}").user?.email) || orderMeta.address?.email || "",
+            email:
+              JSON.parse(localStorage.getItem("auth") || "{}").user?.email ||
+              orderMeta.address?.email ||
+              "",
             contact: orderMeta.address.mobileNo,
           },
           handler: async function (resp) {
@@ -290,7 +294,7 @@ const CheckoutPage = () => {
           "Content-Type": "application/json",
         };
 
-        const res = await axios.post("http://localhost:5000/api/orders/create", payload, { headers });
+        const res = await axios.post(`${API_URL}/api/orders/create`, payload, { headers });
         if (res?.data?.success) {
           toast.success("Order created successfully (COD)");
           clearCart();
@@ -355,7 +359,9 @@ const CheckoutPage = () => {
             {addresses.map((addr, idx) => (
               <label
                 key={idx}
-                className={`flex items-start gap-3 border p-3 rounded-lg cursor-pointer ${idx === selectedAddressIndex ? "border-blue-600 bg-blue-50" : "border-gray-300"}`}
+                className={`flex items-start gap-3 border p-3 rounded-lg cursor-pointer ${
+                  idx === selectedAddressIndex ? "border-blue-600 bg-blue-50" : "border-gray-300"
+                }`}
               >
                 <input
                   type="radio"
@@ -399,14 +405,34 @@ const CheckoutPage = () => {
                   placeholder={field.replace(/([A-Z])/g, " $1")}
                   value={formData[field]}
                   onChange={handleChange}
-                  required={["firstName", "lastName", "mobileNo", "flatNo", "localAddress", "district", "city", "state", "pincode"].includes(field)}
+                  required={[
+                    "firstName",
+                    "lastName",
+                    "mobileNo",
+                    "flatNo",
+                    "localAddress",
+                    "district",
+                    "city",
+                    "state",
+                    "pincode",
+                  ].includes(field)}
                   className="border p-2 w-full rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
                 />
               ))}
             </div>
             <div className="flex justify-end gap-3 mt-4">
-              <button onClick={() => setShowAddressForm(false)} className="px-4 py-2 bg-gray-300 rounded-md hover:bg-gray-400">Cancel</button>
-              <button onClick={handleSaveAddress} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Save</button>
+              <button
+                onClick={() => setShowAddressForm(false)}
+                className="px-4 py-2 bg-gray-300 rounded-md hover:bg-gray-400"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveAddress}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              >
+                Save
+              </button>
             </div>
           </div>
         </div>
@@ -416,8 +442,20 @@ const CheckoutPage = () => {
       <div className="mb-6">
         <label className="font-semibold text-gray-800 mb-2 block">Promo Code</label>
         <div className="flex gap-2">
-          <input type="text" placeholder="Enter promo code" value={promoCode} onChange={(e) => setPromoCode(e.target.value)} className="border p-3 rounded-lg flex-1 focus:ring-2 focus:ring-blue-500 outline-none" />
-          <button onClick={handlePromoCode} type="button" className="bg-green-600 text-white px-5 rounded-lg font-medium hover:bg-green-700 transition-all">Apply</button>
+          <input
+            type="text"
+            placeholder="Enter promo code"
+            value={promoCode}
+            onChange={(e) => setPromoCode(e.target.value)}
+            className="border p-3 rounded-lg flex-1 focus:ring-2 focus:ring-blue-500 outline-none"
+          />
+          <button
+            onClick={handlePromoCode}
+            type="button"
+            className="bg-green-600 text-white px-5 rounded-lg font-medium hover:bg-green-700 transition-all"
+          >
+            Apply
+          </button>
         </div>
       </div>
 
@@ -426,14 +464,22 @@ const CheckoutPage = () => {
         <h3 className="text-lg font-semibold mb-3 text-gray-800">Order Summary</h3>
         {cart?.items?.map((item) => (
           <div key={item.product._id} className="flex justify-between text-gray-700 mb-1">
-            <span>{item.product.title} × {item.quantity}</span>
+            <span>
+              {item.product.title} × {item.quantity}
+            </span>
             <span>₹ {item.product.price * item.quantity}</span>
           </div>
         ))}
         <hr className="my-3" />
         <div className="flex justify-between text-gray-700">
           <span>Subtotal</span>
-          <span>₹ {cart?.items?.reduce((acc, i) => acc + (i.product.price || 0) * i.quantity, 0)}</span>
+          <span>
+            ₹{" "}
+            {cart?.items?.reduce(
+              (acc, i) => acc + (i.product.price || 0) * i.quantity,
+              0
+            )}
+          </span>
         </div>
         {discount > 0 && (
           <div className="flex justify-between text-green-600">
@@ -452,11 +498,27 @@ const CheckoutPage = () => {
       </div>
 
       {/* Submit */}
-      <button onClick={handlePlaceOrder} disabled={loading} className="mt-6 bg-blue-600 text-white w-full py-3 rounded-lg font-semibold hover:bg-blue-700 transition-all">
-        {loading ? "Processing..." : formData.paymentMethod === "Card" ? `Pay ₹ ${finalAmount} with Card` : "Place Order (COD)"}
+      <button
+        onClick={handlePlaceOrder}
+        disabled={loading}
+        className="mt-6 bg-blue-600 text-white w-full py-3 rounded-lg font-semibold hover:bg-blue-700 transition-all"
+      >
+        {loading
+          ? "Processing..."
+          : formData.paymentMethod === "Card"
+          ? `Pay ₹ ${finalAmount} with Card`
+          : "Place Order (COD)"}
       </button>
 
-      {message && <p className={`mt-4 text-center font-semibold ${message.includes("Failed") ? "text-red-600" : "text-green-600"}`}>{message}</p>}
+      {message && (
+        <p
+          className={`mt-4 text-center font-semibold ${
+            message.includes("Failed") ? "text-red-600" : "text-green-600"
+          }`}
+        >
+          {message}
+        </p>
+      )}
     </div>
   );
 };
