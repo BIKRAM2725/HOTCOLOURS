@@ -11,7 +11,7 @@ import ProductDetails from "./page/ProductDetails.jsx";
 import CategoryProducts from "./page/CategoryDetails.jsx";
 import SearchResults from "./page/SearchResults.jsx";
 import CartPage from "./page/CartPage.jsx";
-import CheckOut from "./page/CeckOut.jsx";
+import CheckOut from "./page/CheckOut.jsx";
 import TrackOrder from "./page/TrackOrder.jsx";
 
 // Admin Pages

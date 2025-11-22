@@ -13,8 +13,13 @@ function Login() {
   const [auth, setAuth] = useAuth();
   const navigate = useNavigate();
 
+<<<<<<< HEAD
   // ✅ BASE URL FROM .env
   const API = process.env.REACT_APP_API_URL || "http://localhost:5000";
+=======
+  //  BASE URL FROM .env
+  const API = process.env.REACT_APP_API_URL;
+>>>>>>> 297cb2b (Fixed Checkout import, renamed file, updated routes, cleaned env handling)
 
   const handleSubmit = async (e) => {
     e.preventDefault();
