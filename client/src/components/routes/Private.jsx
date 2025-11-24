@@ -1,4 +1,4 @@
-// src/components/routes/Private.jsx
+
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { Outlet, useNavigate } from "react-router-dom";
@@ -11,36 +11,31 @@ export default function PrivateRoutes() {
   const navigate = useNavigate();
   const [checking, setChecking] = useState(true);
 
+  const API_BASE = process.env.REACT_APP_API_URL;
+
   useEffect(() => {
     let mounted = true;
 
     const checkUser = async () => {
       try {
-        // prefer context auth; fallback to localStorage
-        const stored = typeof window !== "undefined" ? JSON.parse(localStorage.getItem("auth")) : null;
+        const stored =
+          typeof window !== "undefined"
+            ? JSON.parse(localStorage.getItem("auth"))
+            : null;
+
         const authData = auth || stored || {};
         const token = authData?.token;
-        const user = authData?.user;
 
         if (!token) {
-          // no token -> login
           if (mounted) navigate("/login");
           return;
         }
 
-        // verify token with backend (user-auth endpoint)
-        const res = await axios.get("http://localhost:5000/api/auth/user-auth", {
+        const res = await axios.get(`${API_BASE}/api/auth/user-auth`, {
           headers: { Authorization: `Bearer ${token}` },
         });
 
-        // backend returned ok -> token valid
         if (res?.data?.ok) {
-          // if the user (from context/localStorage) is admin, redirect to admin dashboard
-          if (user?.role === "admin") {
-            if (mounted) navigate("/admin/details");
-            return;
-          }
-          // non-admin user with valid token -> allow access
           if (mounted) setOk(true);
         } else {
           if (mounted) navigate("/login");
@@ -58,7 +53,7 @@ export default function PrivateRoutes() {
     return () => {
       mounted = false;
     };
-  }, [auth, navigate]);
+  }, [auth, navigate, API_BASE]);
 
   if (checking) return <Spinner message="Checking user access..." />;
 
