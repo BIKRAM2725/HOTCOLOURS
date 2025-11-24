@@ -7,7 +7,7 @@ import { requiredSignIn } from "../middlewares/Auth.js";
 
 const router = express.Router();
 
-
+// ensure env variables are present
 if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
   console.warn(
     "WARNING: RAZORPAY_KEY_ID or RAZORPAY_KEY_SECRET not set in environment. Payments will fail."
@@ -114,7 +114,7 @@ router.post("/razorpay/verify", requiredSignIn, async (req, res) => {
 
     let createdOrder = null;
 
-    // src/routes/payments.js (only inside verify route)
+
     if (orderMeta && orderMeta.items && Array.isArray(orderMeta.items)) {
       const items = orderMeta.items.map((it) => ({
         product: it.productId,
@@ -173,6 +173,7 @@ router.post("/razorpay/verify", requiredSignIn, async (req, res) => {
       await fallback.save();
     }
 
+    // optionally notify user/admin here using your existing safeNotify helper
 
     return res.json({
       success: true,
