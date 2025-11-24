@@ -5,8 +5,12 @@ const Sticker = forwardRef(({ order }, ref) => {
   if (!order) return null;
 
   const orderId = order._id.slice(-6).toUpperCase();
-  // const qrValue = `https://hotcolours.com/track/${order._id}`;
-    const qrValue = `${process.env.REACT_APP_BASE_URL}/track/${order._id}`;
+
+  // Frontend base URL (for QR)
+  const FRONTEND_BASE =
+    process.env.REACT_APP_BASE_URL || "https://hotcolours-c44r.vercel.app";
+
+  const qrValue = `${FRONTEND_BASE}/track/${order._id}`;
 
   return (
     <div
@@ -27,11 +31,13 @@ const Sticker = forwardRef(({ order }, ref) => {
             <span className="font-semibold">Order:</span> #{orderId}
           </p>
           <p className="text-[10px] mb-1">
-            <span className="font-semibold">Name:</span> {order.address.firstName}{" "}
-            {order.address.lastName}
+            <span className="font-semibold">Name:</span>{" "}
+            {order.address.firstName} {order.address.lastName}
           </p>
           <p className="text-[10px] leading-snug">
-            <span className="font-semibold">Address:</span> {order.address.localAddress}, {order.address.city}, {order.address.state} - {order.address.pincode}
+            <span className="font-semibold">Address:</span>{" "}
+            {order.address.localAddress}, {order.address.city},{" "}
+            {order.address.state} - {order.address.pincode}
           </p>
         </div>
 
@@ -44,7 +50,7 @@ const Sticker = forwardRef(({ order }, ref) => {
       <div className="flex items-center justify-center">
         <QRCodeCanvas
           value={qrValue}
-          size={90} // slightly larger for better scanning
+          size={90}
           bgColor="#ffffff"
           fgColor="#000000"
           level="H"
