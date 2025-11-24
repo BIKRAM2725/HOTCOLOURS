@@ -6,7 +6,7 @@ const Sticker = forwardRef(({ order }, ref) => {
 
   const orderId = order._id.slice(-6).toUpperCase();
 
-  // Frontend base URL (for QR)
+  // 👇 Base URL for QR – env var OR fallback to production URL
   const FRONTEND_BASE =
     process.env.REACT_APP_BASE_URL || "https://hotcolours-c44r.vercel.app";
 
@@ -17,7 +17,7 @@ const Sticker = forwardRef(({ order }, ref) => {
       ref={ref}
       className="p-4 w-[360px] h-[210px] bg-white border border-gray-300 rounded-xl shadow-lg flex justify-between font-sans"
     >
-      {/* Left side - order info */}
+      {/* left side */}
       <div className="flex flex-col justify-between h-full">
         <div>
           <h2 className="text-[20px] font-bold text-[#d12e2e] mb-1 tracking-wide">
@@ -46,7 +46,7 @@ const Sticker = forwardRef(({ order }, ref) => {
         </p>
       </div>
 
-      {/* Right side - QR code */}
+      {/* right side – QR */}
       <div className="flex items-center justify-center">
         <QRCodeCanvas
           value={qrValue}
